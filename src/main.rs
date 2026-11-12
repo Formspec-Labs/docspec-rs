@@ -805,13 +805,29 @@ async fn async_main() -> anyhow::Result<()> {
             input,
             output,
             column,
-        } => {
-            let result = docspec::nquads::export_nquads(&input, &output, &column, &limits)?;
-            serde_json::to_writer(std::io::stdout(), &result)?;
-            println!();
-        }
+        } => match docspec::nquads::export_nquads(&input, &output, &column, &limits).await {
+            Ok(result) => {
+                serde_json::to_writer(std::io::stdout(), &result)?;
+                println!();
+            }
+            Err(error) => {
+                serde_json::to_writer(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "status": "failed",
+                        "error": {"code": error.code(), "message": error.message()},
+                    }),
+                )?;
+                println!();
+                return Err(error.into());
+            }
+        },
         Command::OwnerWorker => {
-            docspec::owner_worker::serve_stdio(parsed_limits).await?;
+            let handle = tokio::runtime::Handle::current();
+            tokio::task::spawn_blocking(move || {
+                docspec::owner_worker::serve_stdio(parsed_limits, handle)
+            })
+            .await??;
         }
         command => {
             let engine = if let Some(path) = &cli.snapshot_source {

@@ -20,21 +20,23 @@ use base64::Engine as _;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
-pub const MAX_EXACT_NODES: usize = 300_000;
-pub const MAX_EXACT_DEPTH: usize = 48;
-pub const MAX_EXACT_STRING_BYTES: usize = 1_000_000;
-pub const MAX_EXACT_NUMBER_LEN: usize = 1024;
+pub(super) const MAX_EXACT_NODES: usize = 300_000;
+pub(super) const MAX_EXACT_DEPTH: usize = 48;
+pub(super) const MAX_EXACT_STRING_BYTES: usize = 1_000_000;
+pub(super) const MAX_EXACT_PAGE_BYTES: usize = 16 << 20;
+pub(super) const MAX_EXACT_NUMBER_LEN: usize = 1024;
+const NODE_OVERHEAD_BYTES: usize = 32;
 
 /// Structured protocol error mapped to `{ code, message, status }` on stdout.
 #[derive(Debug, Clone)]
-pub struct BridgeError {
+pub(super) struct BridgeError {
     pub code: &'static str,
     pub message: String,
     pub status: u16,
 }
 
 impl BridgeError {
-    pub fn new(code: &'static str, message: impl Into<String>, status: u16) -> Self {
+    pub(super) fn new(code: &'static str, message: impl Into<String>, status: u16) -> Self {
         Self {
             code,
             message: message.into(),
@@ -51,14 +53,24 @@ impl std::fmt::Display for BridgeError {
 
 impl std::error::Error for BridgeError {}
 
-/// Mutable node counter enforcing structure and depth budgets across a response page.
-#[derive(Debug, Default)]
-pub struct ExactBudget {
+/// Mutable node and byte counter enforcing structure, depth, and memory budgets across a page.
+#[derive(Debug)]
+pub(super) struct ExactBudget {
     pub nodes: usize,
+    pub bytes: usize,
+    pub max_bytes: usize,
 }
 
 impl ExactBudget {
-    pub fn step(&mut self, depth: usize) -> Result<(), BridgeError> {
+    pub(super) fn with_max_bytes(max_bytes: usize) -> Self {
+        Self {
+            nodes: 0,
+            bytes: 0,
+            max_bytes,
+        }
+    }
+
+    pub(super) fn step(&mut self, depth: usize) -> Result<(), BridgeError> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > MAX_EXACT_NODES || depth > MAX_EXACT_DEPTH {
             return Err(BridgeError::new(
@@ -67,13 +79,31 @@ impl ExactBudget {
                 413,
             ));
         }
+        self.charge_bytes(NODE_OVERHEAD_BYTES)
+    }
+
+    pub(super) fn charge_bytes(&mut self, add: usize) -> Result<(), BridgeError> {
+        self.bytes = self.bytes.saturating_add(add);
+        if self.bytes > self.max_bytes {
+            return Err(BridgeError::new(
+                "adapter_budget",
+                "The owner page exceeds the supported byte budget.",
+                413,
+            ));
+        }
         Ok(())
+    }
+}
+
+impl Default for ExactBudget {
+    fn default() -> Self {
+        Self::with_max_bytes(MAX_EXACT_PAGE_BYTES)
     }
 }
 
 /// Validates a JSON number lexeme against `/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/`
 /// and the `ddk-exact-json-v1` length and exponent bounds.
-pub fn valid_json_number(value: &str) -> bool {
+pub(super) fn valid_json_number(value: &str) -> bool {
     if value.is_empty() || value.len() > MAX_EXACT_NUMBER_LEN {
         return false;
     }
@@ -137,7 +167,7 @@ pub fn valid_json_number(value: &str) -> bool {
     i == bytes.len()
 }
 
-pub fn valid_integer_lexeme(value: &str) -> bool {
+pub(super) fn valid_integer_lexeme(value: &str) -> bool {
     if value.is_empty() || value.len() > MAX_EXACT_NUMBER_LEN {
         return false;
     }
@@ -152,7 +182,7 @@ pub fn valid_integer_lexeme(value: &str) -> bool {
     matches!(bytes[start], b'1'..=b'9') && bytes[start + 1..].iter().all(u8::is_ascii_digit)
 }
 
-fn exact_number(lexeme: String) -> Result<Value, BridgeError> {
+fn exact_number(lexeme: String, budget: &mut ExactBudget) -> Result<Value, BridgeError> {
     if !valid_json_number(&lexeme) {
         return Err(BridgeError::new(
             "owner_unsupported_type",
@@ -160,20 +190,22 @@ fn exact_number(lexeme: String) -> Result<Value, BridgeError> {
             422,
         ));
     }
+    budget.charge_bytes(lexeme.len().saturating_add(16))?;
     Ok(json!({ "$number": lexeme }))
 }
 
 /// Formats an unscaled integer string and Arrow Decimal `scale` into the exact
 /// fixed-point or scientific lexeme produced by `docspec-owner-bridge.py:_decimal_lexeme`.
-pub fn decimal_lexeme_from_raw(raw_unscaled: &str, scale: i8) -> Result<String, BridgeError> {
+pub(super) fn decimal_lexeme_from_raw(
+    raw_unscaled: &str,
+    scale: i8,
+) -> Result<String, BridgeError> {
     let (neg, raw_digits) = match raw_unscaled.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, raw_unscaled),
     };
     let stripped = raw_digits.trim_start_matches('0');
     let digits = if stripped.is_empty() { "0" } else { stripped };
-    // Non-zero check: Arrow integer representations of 0 are never signed (-0),
-    // so `neg` is only true when `digits != "0"`.
     let sign = if neg && digits != "0" { "-" } else { "" };
     let exp = -i32::from(scale);
 
@@ -191,7 +223,6 @@ pub fn decimal_lexeme_from_raw(raw_unscaled: &str, scale: i8) -> Result<String, 
             format!("{sign}{}.{}", &digits[..split], &digits[split..])
         }
     } else {
-        // IEEE 754 / Python `str(Decimal)` formatting outside -30 <= exp <= 0
         let adj = (digits.len() as i32) + exp - 1;
         if exp <= 0 && adj >= -6 {
             let s = (-exp) as usize;
@@ -299,8 +330,9 @@ fn civil_from_days(days: i64) -> Result<(i32, u32, u32), BridgeError> {
     Ok((year as i32, m, d))
 }
 
-fn format_date_days(days: i64) -> Result<Value, BridgeError> {
+fn format_date_days(days: i64, budget: &mut ExactBudget) -> Result<Value, BridgeError> {
     let (year, month, day) = civil_from_days(days)?;
+    budget.charge_bytes(10)?;
     Ok(Value::String(format!("{year:04}-{month:02}-{day:02}")))
 }
 
@@ -326,7 +358,7 @@ fn format_fraction(rem: i64, digits: usize) -> String {
     }
 }
 
-pub fn format_epoch_timestamp(
+pub(super) fn format_epoch_timestamp(
     raw: i64,
     unit: TimeUnit,
     tz: Option<&str>,
@@ -360,12 +392,13 @@ pub fn format_epoch_timestamp(
     ))
 }
 
-pub fn format_time_of_day(raw: i64, unit: TimeUnit) -> Result<String, BridgeError> {
+pub(super) fn format_time_of_day(raw: i64, unit: TimeUnit) -> Result<String, BridgeError> {
     let (scale, digits) = unit_scale_and_digits(unit);
-    if raw < 0 {
+    let day_ticks = 86_400_i64.saturating_mul(scale);
+    if raw < 0 || raw >= day_ticks {
         return Err(BridgeError::new(
             "owner_unsupported_type",
-            "Negative time-of-day value cannot be serialized.",
+            "Time-of-day value is outside valid 00:00:00..24:00:00 range.",
             422,
         ));
     }
@@ -379,9 +412,13 @@ pub fn format_time_of_day(raw: i64, unit: TimeUnit) -> Result<String, BridgeErro
     Ok(format!("{hours:02}:{minutes:02}:{seconds:02}{frac}"))
 }
 
-pub fn wrap_exact_object(entries: Vec<(String, Value)>) -> Result<Value, BridgeError> {
+pub(super) fn wrap_exact_object(
+    entries: Vec<(String, Value)>,
+    budget: &mut ExactBudget,
+) -> Result<Value, BridgeError> {
     let mut seen = BTreeSet::new();
     let mut needs_escape = false;
+    let mut key_bytes = 0usize;
     for (key, _) in &entries {
         if !seen.insert(key.as_str()) {
             return Err(BridgeError::new(
@@ -390,10 +427,12 @@ pub fn wrap_exact_object(entries: Vec<(String, Value)>) -> Result<Value, BridgeE
                 409,
             ));
         }
+        key_bytes = key_bytes.saturating_add(key.len().saturating_add(16));
         if key == "$number" || key == "$object" {
             needs_escape = true;
         }
     }
+    budget.charge_bytes(key_bytes)?;
     if needs_escape {
         let pairs: Vec<Value> = entries
             .into_iter()
@@ -408,16 +447,25 @@ pub fn wrap_exact_object(entries: Vec<(String, Value)>) -> Result<Value, BridgeE
     Ok(Value::Object(map))
 }
 
-fn encode_binary(bytes: &[u8]) -> Value {
+fn encode_binary(bytes: &[u8], budget: &mut ExactBudget) -> Result<Value, BridgeError> {
+    if bytes.len() > MAX_EXACT_STRING_BYTES {
+        return Err(BridgeError::new(
+            "adapter_budget",
+            "An owner binary value exceeds the supported value budget.",
+            413,
+        ));
+    }
+    let b64_len = bytes.len().div_ceil(3).saturating_mul(4);
+    budget.charge_bytes(b64_len.saturating_add(48))?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    json!({
+    Ok(json!({
         "type": "binary",
         "encoding": "base64",
         "value": b64,
-    })
+    }))
 }
 
-fn encode_string(text: &str) -> Result<Value, BridgeError> {
+fn encode_string(text: &str, budget: &mut ExactBudget) -> Result<Value, BridgeError> {
     if text.len() > MAX_EXACT_STRING_BYTES {
         return Err(BridgeError::new(
             "adapter_budget",
@@ -425,6 +473,7 @@ fn encode_string(text: &str) -> Result<Value, BridgeError> {
             413,
         ));
     }
+    budget.charge_bytes(text.len())?;
     Ok(Value::String(text.to_owned()))
 }
 
@@ -436,18 +485,51 @@ fn downcast_err(data_type: &DataType) -> BridgeError {
     )
 }
 
+fn unwrap_dictionary(
+    mut array: &dyn Array,
+    mut index: usize,
+) -> Result<Option<(&dyn Array, usize)>, BridgeError> {
+    let mut hops = 0usize;
+    while matches!(array.data_type(), DataType::Dictionary(_, _)) {
+        if array.is_null(index) {
+            return Ok(None);
+        }
+        hops += 1;
+        if hops > MAX_EXACT_DEPTH {
+            return Err(BridgeError::new(
+                "adapter_budget",
+                "The owner page exceeds the supported structure budget.",
+                413,
+            ));
+        }
+        let dtype = array.data_type();
+        let dict = array
+            .as_any_dictionary_opt()
+            .ok_or_else(|| downcast_err(dtype))?;
+        let val_idx = dict_key_index(dict.keys(), index)
+            .filter(|&k| k < dict.values().len())
+            .ok_or_else(|| downcast_err(dtype))?;
+        array = dict.values().as_ref();
+        index = val_idx;
+    }
+    if array.data_type() == &DataType::Null || array.is_null(index) {
+        return Ok(None);
+    }
+    Ok(Some((array, index)))
+}
+
 /// Encodes one cell of an Arrow [`Array`] into lossless `ddk-exact-json-v1`.
-pub fn encode_array_value(
-    array: &dyn Array,
-    index: usize,
+pub(super) fn encode_array_value(
+    raw_array: &dyn Array,
+    raw_index: usize,
     depth: usize,
     budget: &mut ExactBudget,
 ) -> Result<Value, BridgeError> {
     budget.step(depth)?;
-    let dtype = array.data_type();
-    if dtype == &DataType::Null || array.is_null(index) {
+    let Some((array, index)) = unwrap_dictionary(raw_array, raw_index)? else {
         return Ok(Value::Null);
-    }
+    };
+    let dtype = array.data_type();
     match dtype {
         DataType::Null => Ok(Value::Null),
         DataType::Boolean => {
@@ -462,56 +544,56 @@ pub fn encode_array_value(
                 .as_any()
                 .downcast_ref::<Int8Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::Int16 => {
             let a = array
                 .as_any()
                 .downcast_ref::<Int16Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::Int32 => {
             let a = array
                 .as_any()
                 .downcast_ref::<Int32Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::Int64 => {
             let a = array
                 .as_any()
                 .downcast_ref::<Int64Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::UInt8 => {
             let a = array
                 .as_any()
                 .downcast_ref::<UInt8Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::UInt16 => {
             let a = array
                 .as_any()
                 .downcast_ref::<UInt16Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::UInt32 => {
             let a = array
                 .as_any()
                 .downcast_ref::<UInt32Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::UInt64 => {
             let a = array
                 .as_any()
                 .downcast_ref::<UInt64Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            exact_number(a.value(index).to_string())
+            exact_number(a.value(index).to_string(), budget)
         }
         DataType::Decimal128(_, scale) => {
             let a = array
@@ -519,7 +601,7 @@ pub fn encode_array_value(
                 .downcast_ref::<Decimal128Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
             let lex = decimal_lexeme_from_raw(&a.value(index).to_string(), *scale)?;
-            exact_number(lex)
+            exact_number(lex, budget)
         }
         DataType::Decimal256(_, scale) => {
             let a = array
@@ -527,7 +609,7 @@ pub fn encode_array_value(
                 .downcast_ref::<Decimal256Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
             let lex = decimal_lexeme_from_raw(&a.value(index).to_string(), *scale)?;
-            exact_number(lex)
+            exact_number(lex, budget)
         }
         DataType::Float16 => {
             let a = array
@@ -535,7 +617,7 @@ pub fn encode_array_value(
                 .downcast_ref::<Float16Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
             let lex = float_lexeme_f32(a.value(index).to_f32())?;
-            exact_number(lex)
+            exact_number(lex, budget)
         }
         DataType::Float32 => {
             let a = array
@@ -543,7 +625,7 @@ pub fn encode_array_value(
                 .downcast_ref::<Float32Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
             let lex = float_lexeme_f32(a.value(index))?;
-            exact_number(lex)
+            exact_number(lex, budget)
         }
         DataType::Float64 => {
             let a = array
@@ -551,70 +633,78 @@ pub fn encode_array_value(
                 .downcast_ref::<Float64Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
             let lex = float_lexeme_f64(a.value(index))?;
-            exact_number(lex)
+            exact_number(lex, budget)
         }
         DataType::Utf8 => {
             let a = array
                 .as_any()
                 .downcast_ref::<StringArray>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            encode_string(a.value(index))
+            encode_string(a.value(index), budget)
         }
         DataType::LargeUtf8 => {
             let a = array
                 .as_any()
                 .downcast_ref::<LargeStringArray>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            encode_string(a.value(index))
+            encode_string(a.value(index), budget)
         }
         DataType::Utf8View => {
             let a = array
                 .as_any()
                 .downcast_ref::<StringViewArray>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            encode_string(a.value(index))
+            encode_string(a.value(index), budget)
         }
         DataType::Binary => {
             let a = array
                 .as_any()
                 .downcast_ref::<BinaryArray>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            Ok(encode_binary(a.value(index)))
+            encode_binary(a.value(index), budget)
         }
         DataType::LargeBinary => {
             let a = array
                 .as_any()
                 .downcast_ref::<LargeBinaryArray>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            Ok(encode_binary(a.value(index)))
+            encode_binary(a.value(index), budget)
         }
         DataType::FixedSizeBinary(_) => {
             let a = array
                 .as_any()
                 .downcast_ref::<FixedSizeBinaryArray>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            Ok(encode_binary(a.value(index)))
+            encode_binary(a.value(index), budget)
         }
         DataType::BinaryView => {
             let a = array
                 .as_any()
                 .downcast_ref::<BinaryViewArray>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            Ok(encode_binary(a.value(index)))
+            encode_binary(a.value(index), budget)
         }
         DataType::Date32 => {
             let a = array
                 .as_any()
                 .downcast_ref::<Date32Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            format_date_days(i64::from(a.value(index)))
+            format_date_days(i64::from(a.value(index)), budget)
         }
         DataType::Date64 => {
             let a = array
                 .as_any()
                 .downcast_ref::<Date64Array>()
                 .ok_or_else(|| downcast_err(dtype))?;
-            format_date_days(a.value(index).div_euclid(86_400_000))
+            let ms = a.value(index);
+            if ms.rem_euclid(86_400_000) != 0 {
+                return Err(BridgeError::new(
+                    "owner_unsupported_type",
+                    "Date64 value contains non-midnight sub-day milliseconds.",
+                    422,
+                ));
+            }
+            format_date_days(ms.div_euclid(86_400_000), budget)
         }
         DataType::Timestamp(unit, tz) => {
             let raw = match unit {
@@ -639,11 +729,9 @@ pub fn encode_array_value(
                     .ok_or_else(|| downcast_err(dtype))?
                     .value(index),
             };
-            Ok(Value::String(format_epoch_timestamp(
-                raw,
-                *unit,
-                tz.as_deref(),
-            )?))
+            let formatted = format_epoch_timestamp(raw, *unit, tz.as_deref())?;
+            budget.charge_bytes(formatted.len())?;
+            Ok(Value::String(formatted))
         }
         DataType::Time32(unit) => {
             let raw = match unit {
@@ -663,7 +751,9 @@ pub fn encode_array_value(
                 ),
                 _ => return Err(downcast_err(dtype)),
             };
-            Ok(Value::String(format_time_of_day(raw, *unit)?))
+            let formatted = format_time_of_day(raw, *unit)?;
+            budget.charge_bytes(formatted.len())?;
+            Ok(Value::String(formatted))
         }
         DataType::Time64(unit) => {
             let raw = match unit {
@@ -679,7 +769,9 @@ pub fn encode_array_value(
                     .value(index),
                 _ => return Err(downcast_err(dtype)),
             };
-            Ok(Value::String(format_time_of_day(raw, *unit)?))
+            let formatted = format_time_of_day(raw, *unit)?;
+            budget.charge_bytes(formatted.len())?;
+            Ok(Value::String(formatted))
         }
         DataType::Duration(unit) => {
             let raw = match unit {
@@ -704,7 +796,7 @@ pub fn encode_array_value(
                     .ok_or_else(|| downcast_err(dtype))?
                     .value(index),
             };
-            exact_number(raw.to_string())
+            exact_number(raw.to_string(), budget)
         }
         DataType::List(_) => {
             let a = array
@@ -781,16 +873,7 @@ pub fn encode_array_value(
                 let val = encode_array_value(col.as_ref(), index, depth + 1, budget)?;
                 entries.push((field.name().clone(), val));
             }
-            wrap_exact_object(entries)
-        }
-        DataType::Dictionary(_, _) => {
-            let dict = array
-                .as_any_dictionary_opt()
-                .ok_or_else(|| downcast_err(dtype))?;
-            let val_idx = dict_key_index(dict.keys(), index)
-                .filter(|&k| k < dict.values().len())
-                .ok_or_else(|| downcast_err(dtype))?;
-            encode_array_value(dict.values().as_ref(), val_idx, depth, budget)
+            wrap_exact_object(entries, budget)
         }
         other => Err(BridgeError::new(
             "owner_unsupported_type",
@@ -838,7 +921,7 @@ fn encode_list_range(
 }
 
 /// Encodes one row (`row_idx`) of a [`RecordBatch`] into an exact `ddk-exact-json-v1` object.
-pub fn encode_batch_row(
+pub(super) fn encode_batch_row(
     batch: &RecordBatch,
     row_idx: usize,
     budget: &mut ExactBudget,
@@ -850,12 +933,14 @@ pub fn encode_batch_row(
         let val = encode_array_value(batch.column(col_idx).as_ref(), row_idx, 1, budget)?;
         entries.push((field.name().clone(), val));
     }
-    wrap_exact_object(entries)
+    wrap_exact_object(entries, budget)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::array::{DictionaryArray, LargeBinaryArray};
+    use arrow::datatypes::Int32Type;
 
     #[test]
     fn decimal_lexemes_preserve_trailing_zeros_and_signs() {
@@ -874,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn timestamps_and_times_match_python_bridge_formatting() {
+    fn timestamps_dates_times_binary_and_dictionary_accounting_enforce_bounds() {
         assert_eq!(
             format_epoch_timestamp(1_794_406_516_123_456_789, TimeUnit::Nanosecond, Some("UTC"))
                 .unwrap(),
@@ -892,6 +977,41 @@ mod tests {
         assert_eq!(
             format_time_of_day(3_723_050_000, TimeUnit::Microsecond).unwrap(),
             "01:02:03.05"
+        );
+        // Out-of-range time-of-day (>= 24h) is refused
+        assert_eq!(
+            format_time_of_day(86_400, TimeUnit::Second)
+                .unwrap_err()
+                .code,
+            "owner_unsupported_type"
+        );
+
+        // Non-midnight Date64 is refused
+        let bad_date64 = Date64Array::from(vec![45_000_000_i64]);
+        let mut budget = ExactBudget::default();
+        assert_eq!(
+            encode_array_value(&bad_date64, 0, 1, &mut budget)
+                .unwrap_err()
+                .code,
+            "owner_unsupported_type"
+        );
+
+        // Dictionary array charges only 1 node (not 2)
+        let dict: DictionaryArray<Int32Type> = vec!["alpha", "beta", "alpha"].into_iter().collect();
+        let mut dict_budget = ExactBudget::default();
+        let encoded = encode_array_value(&dict, 2, 1, &mut dict_budget).unwrap();
+        assert_eq!(encoded, json!("alpha"));
+        assert_eq!(dict_budget.nodes, 1);
+
+        // Oversized LargeBinary (> 1 MB) is refused before base64 allocation
+        let huge_bin =
+            LargeBinaryArray::from(vec![vec![0u8; MAX_EXACT_STRING_BYTES + 1].as_slice()]);
+        let mut bin_budget = ExactBudget::default();
+        assert_eq!(
+            encode_array_value(&huge_bin, 0, 1, &mut bin_budget)
+                .unwrap_err()
+                .code,
+            "adapter_budget"
         );
     }
 }

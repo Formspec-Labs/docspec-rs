@@ -1,7 +1,10 @@
 // Rust guideline compliant 2026-02-21
 //! Streaming Parquet-to-N-Quads export with exact input and output SHA-256 receipts.
 
-use crate::{Error, Result, budget::Limits};
+use crate::{
+    Error, Result,
+    budget::{Budget, Limits},
+};
 use arrow::{
     array::{
         Array, AsArray, Int8Array, Int16Array, Int32Array, Int64Array, LargeStringArray,
@@ -14,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
-    io::{BufWriter, Read, Write},
+    io::{BufWriter, Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -67,17 +70,69 @@ impl Drop for TempFileGuard {
     }
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
-    let mut file = File::open(path)?;
+fn hash_and_check_tail(
+    file: &mut File,
+    expected_len: u64,
+    max_metadata_bytes: usize,
+    display_path: &Path,
+) -> Result<String> {
+    if expected_len < 12 {
+        return Err(Error::refusal(
+            "invalid_export",
+            format!(
+                "Parquet input {} is smaller than a valid Parquet footer",
+                display_path.display()
+            ),
+        ));
+    }
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; IO_BUF_BYTES];
+    let mut total_read = 0u64;
+    let mut tail = [0u8; 8];
     loop {
         let read = file.read(&mut buf)?;
         if read == 0 {
             break;
         }
         hasher.update(&buf[..read]);
+        total_read = total_read.saturating_add(read as u64);
+        if read >= 8 {
+            tail.copy_from_slice(&buf[read - 8..read]);
+        } else {
+            let keep = 8 - read;
+            tail.copy_within(read..8, 0);
+            tail[keep..8].copy_from_slice(&buf[..read]);
+        }
     }
+    if total_read != expected_len {
+        return Err(Error::refusal(
+            "invalid_export",
+            format!(
+                "Parquet input {} changed size while hashing",
+                display_path.display()
+            ),
+        ));
+    }
+    if &tail[4..8] != b"PAR1" {
+        return Err(Error::refusal(
+            "invalid_export",
+            format!(
+                "Parquet input {} has an invalid Parquet footer magic",
+                display_path.display()
+            ),
+        ));
+    }
+    let footer_len = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]) as usize;
+    if footer_len > max_metadata_bytes {
+        return Err(Error::refusal(
+            "metadata_capacity",
+            format!(
+                "Parquet input {} footer ({footer_len} bytes) exceeds max_metadata_bytes ({max_metadata_bytes} bytes)",
+                display_path.display()
+            ),
+        ));
+    }
+    file.rewind()?;
     Ok(format!("{:x}", hasher.finalize()))
 }
 
@@ -159,16 +214,18 @@ fn string_at<'a>(array: &'a dyn Array, index: usize, column: &str) -> Result<Opt
     ))
 }
 
-/// Streams a projected string column from a Parquet file to an atomic `.nq` file.
+/// Streams a projected string column from a Parquet file to a create-only durable `.nq` file.
 ///
 /// # Errors
-/// Refuses missing/unreadable input files, missing or non-string columns, and I/O errors.
-pub fn export_nquads(
+/// Refuses invalid limits, missing/oversized inputs, existing output destinations,
+/// non-string columns, empty or multi-line quad cells, and I/O errors.
+pub async fn export_nquads(
     input: &Path,
     output: &Path,
     column: &str,
     limits: &Limits,
 ) -> Result<ExportNquadsResult> {
+    let budget = Budget::new(limits.clone())?;
     if column.trim().is_empty() {
         return Err(Error::refusal(
             "invalid_export",
@@ -181,7 +238,25 @@ pub fn export_nquads(
             format!("Parquet input {} is unavailable: {err}", input.display()),
         )
     })?;
-    if !std::fs::metadata(&input_abs)?.is_file() {
+    let (parent_abs, output_abs, file_name) = resolve_output_path(output)?;
+    if std::fs::symlink_metadata(&output_abs).is_ok() {
+        return Err(Error::refusal(
+            "existing_output",
+            format!("N-Quads output already exists at {}", output_abs.display()),
+        ));
+    }
+
+    let mut file = File::open(&input_abs).map_err(|err| {
+        Error::refusal(
+            "missing_input",
+            format!(
+                "Parquet input {} is unavailable: {err}",
+                input_abs.display()
+            ),
+        )
+    })?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
         return Err(Error::refusal(
             "invalid_export",
             format!(
@@ -190,10 +265,15 @@ pub fn export_nquads(
             ),
         ));
     }
-    let (parent_abs, output_abs, file_name) = resolve_output_path(output)?;
-    let input_sha256 = sha256_file(&input_abs)?;
 
-    let file = File::open(&input_abs)?;
+    let _footer_permit = crate::storage::admit_parquet_footer(&input_abs, &budget).await?;
+    let input_sha256 = hash_and_check_tail(
+        &mut file,
+        meta.len(),
+        budget.limits.max_metadata_bytes,
+        &input_abs,
+    )?;
+
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
     let root_fields = builder.parquet_schema().root_schema().get_fields();
     let root_col_idx = root_fields
@@ -236,10 +316,9 @@ pub fn export_nquads(
     }
 
     let mask = ProjectionMask::roots(builder.parquet_schema(), [root_col_idx]);
-    let batch_rows = limits.batch_rows.max(1);
     let reader = builder
         .with_projection(mask)
-        .with_batch_size(batch_rows)
+        .with_batch_size(budget.limits.batch_rows)
         .build()?;
 
     let temp_path = parent_abs.join(format!(
@@ -259,20 +338,43 @@ pub fn export_nquads(
 
     for batch_res in reader {
         let batch = batch_res?;
+        let batch_bytes = batch.get_array_memory_size();
+        if batch_bytes > budget.limits.max_batch_bytes {
+            return Err(Error::refusal(
+                "capacity",
+                format!(
+                    "export-nquads decoded batch ({batch_bytes} bytes) exceeds max_batch_bytes ({} bytes)",
+                    budget.limits.max_batch_bytes
+                ),
+            ));
+        }
+        let _batch_permit = budget.reserve(batch_bytes)?;
         let col = batch.column(0).as_ref();
         for row_idx in 0..batch.num_rows() {
             let Some(line) = string_at(col, row_idx, column)? else {
                 continue;
             };
-            let raw = line.as_bytes();
-            writer.write_all(raw)?;
-            out_hasher.update(raw);
-            out_bytes = out_bytes.saturating_add(raw.len() as u64);
-            if !raw.ends_with(b"\n") {
-                writer.write_all(b"\n")?;
-                out_hasher.update(b"\n");
-                out_bytes = out_bytes.saturating_add(1);
+            let trimmed = line.strip_suffix('\n').unwrap_or(line);
+            if trimmed.trim().is_empty() {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    format!(
+                        "export-nquads column {column:?} contains an empty or whitespace-only quad"
+                    ),
+                ));
             }
+            if trimmed.contains(['\n', '\r']) {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    format!("export-nquads column {column:?} contains embedded newline characters"),
+                ));
+            }
+            let raw = trimmed.as_bytes();
+            writer.write_all(raw)?;
+            writer.write_all(b"\n")?;
+            out_hasher.update(raw);
+            out_hasher.update(b"\n");
+            out_bytes = out_bytes.saturating_add((raw.len() as u64).saturating_add(1));
             quads = quads.saturating_add(1);
         }
     }
@@ -284,8 +386,19 @@ pub fn export_nquads(
     inner_file.sync_all()?;
     drop(inner_file);
 
-    std::fs::rename(&temp_path, &output_abs)?;
+    std::fs::hard_link(&temp_path, &output_abs).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::AlreadyExists {
+            Error::refusal(
+                "existing_output",
+                format!("N-Quads output already exists at {}", output_abs.display()),
+            )
+        } else {
+            Error::from(err)
+        }
+    })?;
+    std::fs::remove_file(&temp_path)?;
     guard.disarm();
+    File::open(&parent_abs)?.sync_all()?;
     let final_output = std::fs::canonicalize(&output_abs).unwrap_or(output_abs);
 
     Ok(ExportNquadsResult {

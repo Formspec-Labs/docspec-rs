@@ -29,6 +29,15 @@ fn sha256_file_hex(path: &Path) -> String {
     sha256_hex(&std::fs::read(path).unwrap())
 }
 
+fn write_single_string_parquet(path: &Path, values: Vec<Option<&str>>) {
+    let schema = Arc::new(Schema::new(vec![Field::new("nquad", DataType::Utf8, true)]));
+    let batch =
+        RecordBatch::try_new(schema.clone(), vec![Arc::new(StringArray::from(values))]).unwrap();
+    let mut writer = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+}
+
 #[test]
 fn export_nquads_cli_streams_projected_column_with_exact_digests_and_quad_count() {
     let root = tempfile::tempdir().unwrap();
@@ -123,7 +132,21 @@ fn export_nquads_cli_streams_projected_column_with_exact_digests_and_quad_count(
     let custom_receipt: Value = serde_json::from_slice(&custom_out.stdout).unwrap();
     assert_eq!(custom_receipt["output"]["quads"], 2);
 
-    // Non-string column is refused cleanly without leaving temp files
+    // Pre-existing output destination is refused with structured `existing_output` without overwriting
+    let overwrite_out = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .args(["export-nquads", "--input"])
+        .arg(&parquet_path)
+        .arg("--output")
+        .arg(&nq_path)
+        .output()
+        .unwrap();
+    assert!(!overwrite_out.status.success());
+    let overwrite_json: Value = serde_json::from_slice(&overwrite_out.stdout).unwrap();
+    assert_eq!(overwrite_json["status"], "failed");
+    assert_eq!(overwrite_json["error"]["code"], "existing_output");
+    assert_eq!(std::fs::read(&nq_path).unwrap(), expected_nq.as_bytes());
+
+    // Non-string column is refused cleanly with structured JSON and zero leftover files
     let bad_nq_path = root.path().join("out/refused.nq");
     let bad_out = Command::new(env!("CARGO_BIN_EXE_docspec"))
         .args(["export-nquads", "--input"])
@@ -134,7 +157,49 @@ fn export_nquads_cli_streams_projected_column_with_exact_digests_and_quad_count(
         .output()
         .unwrap();
     assert!(!bad_out.status.success());
+    let bad_json: Value = serde_json::from_slice(&bad_out.stdout).unwrap();
+    assert_eq!(bad_json["status"], "failed");
+    assert_eq!(bad_json["error"]["code"], "invalid_export");
     assert!(!bad_nq_path.exists());
+
+    // Embedded newline inside a single cell is refused (`invalid_export`) without publishing output
+    let multiline_parquet = root.path().join("multiline.parquet");
+    write_single_string_parquet(
+        &multiline_parquet,
+        vec![Some(
+            "<urn:s:1> <urn:p:1> \"a\" .\n<urn:s:2> <urn:p:1> \"injected\" .",
+        )],
+    );
+    let multiline_nq = root.path().join("out/multiline.nq");
+    let multiline_out = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .args(["export-nquads", "--input"])
+        .arg(&multiline_parquet)
+        .arg("--output")
+        .arg(&multiline_nq)
+        .output()
+        .unwrap();
+    assert!(!multiline_out.status.success());
+    let multiline_json: Value = serde_json::from_slice(&multiline_out.stdout).unwrap();
+    assert_eq!(multiline_json["status"], "failed");
+    assert_eq!(multiline_json["error"]["code"], "invalid_export");
+    assert!(!multiline_nq.exists());
+
+    // Empty / whitespace-only quad cell is refused (`invalid_export`)
+    let blank_parquet = root.path().join("blank.parquet");
+    write_single_string_parquet(&blank_parquet, vec![Some("   \t  ")]);
+    let blank_nq = root.path().join("out/blank.nq");
+    let blank_out = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .args(["export-nquads", "--input"])
+        .arg(&blank_parquet)
+        .arg("--output")
+        .arg(&blank_nq)
+        .output()
+        .unwrap();
+    assert!(!blank_out.status.success());
+    let blank_json: Value = serde_json::from_slice(&blank_out.stdout).unwrap();
+    assert_eq!(blank_json["status"], "failed");
+    assert_eq!(blank_json["error"]["code"], "invalid_export");
+    assert!(!blank_nq.exists());
 }
 
 fn build_owner_test_batch(rows_range: std::ops::Range<usize>) -> RecordBatch {
@@ -260,9 +325,13 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     let data_dir = root_canon.join("data");
     let catalog_dir = root_canon.join("catalog");
     let recipes_dir = catalog_dir.join("recipes");
-    let receipts_dir = root_canon.join("receipts");
+    let receipts_root = root_canon.join("receipts-root");
+    let receipts_dir = receipts_root.join("nested");
+    let outside_dir = root_canon.join("outside");
     std::fs::create_dir_all(&data_dir).unwrap();
     std::fs::create_dir_all(&recipes_dir).unwrap();
+    std::fs::create_dir_all(&receipts_root).unwrap();
+    std::fs::create_dir_all(&outside_dir).unwrap();
 
     // Write full 5-row Parquet (row_group_size=2) + 3 multi-shard files [0..2), [2..4), [4..5) (row_group_size=1)
     let full_batch = build_owner_test_batch(0..5);
@@ -286,21 +355,39 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
         }));
     }
 
-    // Write SQL recipe companion using both positional `?` and named `$min_amount`
+    // Write a mismatched-schema Parquet shard for cross-shard schema homogeneity test
+    let mismatch_shard_path = data_dir.join("mismatch-shard.parquet");
+    write_single_string_parquet(&mismatch_shard_path, vec![Some("only-one-col")]);
+    let mismatch_bytes = std::fs::read(&mismatch_shard_path).unwrap();
+    let mismatch_sha = sha256_hex(&mismatch_bytes);
+
+    // Write SQL recipe companions:
+    // 1) positional `?` + named `$min_amount`
     let sql_text = "SELECT id, amount, ratio, iri_encode('hello world') AS encoded_iri \
                     FROM ledger \
                     WHERE id = ? AND amount = $min_amount \
                     ORDER BY id ASC;\n";
     let sql_rel = "recipes/high_precision_filter.sql";
-    let sql_path = catalog_dir.join(sql_rel);
-    std::fs::write(&sql_path, sql_text.as_bytes()).unwrap();
+    std::fs::write(catalog_dir.join(sql_rel), sql_text.as_bytes()).unwrap();
     let sql_sha = sha256_hex(sql_text.as_bytes());
 
+    // 2) same_release relationship recipe
     let all_sql_text =
         "SELECT id, amount FROM ledger WHERE id >= ? AND amount >= $min_amount ORDER BY id ASC;\n";
     let all_sql_rel = "recipes/all_rows.sql";
     std::fs::write(catalog_dir.join(all_sql_rel), all_sql_text.as_bytes()).unwrap();
     let all_sql_sha = sha256_hex(all_sql_text.as_bytes());
+
+    // 3) adversarial lexer recipe: nested /* /* */ :inj */, E'a\'b', backticks, $$a'b$$,
+    //    exact <=15-digit decimal (:exact_dec = 12345.6700), union schema, and trailing comment after `;`
+    let adv_sql_text = "SELECT `id`, amount, E'a\\'b :inj' AS esc_lit, $$a'b $exact_dec$$ AS dollar_lit, :inj AS bound_payload, :code AS bound_code \
+                        /* outer /* inner */ :inj */ \
+                        FROM ledger \
+                        WHERE amount = :exact_dec \
+                        ORDER BY id ASC;\n-- trailing comment after semicolon\n";
+    let adv_sql_rel = "recipes/adversarial.sql";
+    std::fs::write(catalog_dir.join(adv_sql_rel), adv_sql_text.as_bytes()).unwrap();
+    let adv_sql_sha = sha256_hex(adv_sql_text.as_bytes());
 
     let catalog_doc = json!({
         "specVersion": "0.1",
@@ -351,7 +438,7 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
             },
             {
                 "id": "urn:recipe:requires-release",
-                "sql": "recipes/all_rows.sql",
+                "sql": all_sql_rel,
                 "dialect": "datafusion",
                 "inputs": {"ledger": "ledger"},
                 "relationships": ["urn:relship:same-rel"],
@@ -364,19 +451,35 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
                         "min_amount": {"type": "number"}
                     }
                 }
+            },
+            {
+                "id": "urn:recipe:adversarial",
+                "sql": adv_sql_rel,
+                "dialect": "datafusion",
+                "inputs": {"ledger": "ledger"},
+                "relationships": [],
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["inj", "exact_dec", "code"],
+                    "properties": {
+                        "inj": {"type": "string"},
+                        "exact_dec": {"type": "number"},
+                        "code": {"type": ["string", "integer"]}
+                    }
+                }
             }
         ],
         "files": [
             {"path": sql_rel, "role": "recipe", "sha256": sql_sha},
-            {"path": all_sql_rel, "role": "recipe", "sha256": all_sql_sha}
+            {"path": all_sql_rel, "role": "recipe", "sha256": all_sql_sha},
+            {"path": adv_sql_rel, "role": "recipe", "sha256": adv_sql_sha}
         ]
     });
     let catalog_path = catalog_dir.join("catalog.ddk.json");
-    std::fs::write(
-        &catalog_path,
-        serde_json::to_vec_pretty(&catalog_doc).unwrap(),
-    )
-    .unwrap();
+    let catalog_bytes = serde_json::to_vec_pretty(&catalog_doc).unwrap();
+    std::fs::write(&catalog_path, &catalog_bytes).unwrap();
+    let catalog_sha = sha256_hex(&catalog_bytes);
 
     let lock_doc = json!({
         "specVersion": "0.1",
@@ -384,8 +487,17 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
         "id": "urn:test:owner-catalog:lock",
         "files": [
             {"path": sql_rel, "role": "recipe", "sha256": sql_sha},
-            {"path": all_sql_rel, "role": "recipe", "sha256": all_sql_sha}
-        ]
+            {"path": all_sql_rel, "role": "recipe", "sha256": all_sql_sha},
+            {"path": adv_sql_rel, "role": "recipe", "sha256": adv_sql_sha}
+        ],
+        "extensions": {
+            "urn:ddk:catalog:output-set": [
+                {"path": "catalog.ddk.json", "role": "catalog", "sha256": catalog_sha},
+                {"path": sql_rel, "role": "recipe", "sha256": sql_sha},
+                {"path": all_sql_rel, "role": "recipe", "sha256": all_sql_sha},
+                {"path": adv_sql_rel, "role": "recipe", "sha256": adv_sql_sha}
+            ]
+        }
     });
     let lock_path = catalog_dir.join("catalog.lock.json");
     let lock_bytes = serde_json::to_vec_pretty(&lock_doc).unwrap();
@@ -436,7 +548,25 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     let ping_after = send_rpc(&mut stdin, &mut stdout, json!({"id": 3, "method": "ping"}));
     assert_eq!(ping_after["ok"], true);
 
-    // 3. Tampered lock digest fails with integrity_mismatch (409) without initializing worker
+    // 3a. Missing expectedLockSha256 is refused (`400 invalid_registration`)
+    let missing_lock_sha = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 40,
+            "method": "init",
+            "params": {
+                "permittedRoots": [data_dir, catalog_dir, receipts_root],
+                "catalogPath": catalog_path,
+                "lockPath": lock_path,
+            }
+        }),
+    );
+    assert_eq!(missing_lock_sha["ok"], false);
+    assert_eq!(missing_lock_sha["error"]["code"], "invalid_registration");
+    assert_eq!(missing_lock_sha["error"]["status"], 400);
+
+    // 3b. Tampered lock digest fails with integrity_mismatch (409) without initializing worker
     let bad_lock = send_rpc(
         &mut stdin,
         &mut stdout,
@@ -444,7 +574,7 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
             "id": 4,
             "method": "init",
             "params": {
-                "permittedRoots": [data_dir, catalog_dir],
+                "permittedRoots": [data_dir, catalog_dir, receipts_root],
                 "catalogPath": catalog_path,
                 "lockPath": lock_path,
                 "expectedLockSha256": "0".repeat(64),
@@ -455,7 +585,93 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     assert_eq!(bad_lock["error"]["code"], "integrity_mismatch");
     assert_eq!(bad_lock["error"]["status"], 409);
 
-    // 4. Tampered docspecSha256 fails with integrity_mismatch (409)
+    // 3c. catalogPath outside permittedRoots is refused (`409 evidence_refused`)
+    let unpermitted_cat = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 41,
+            "method": "init",
+            "params": {
+                "permittedRoots": [data_dir],
+                "catalogPath": catalog_path,
+                "lockPath": lock_path,
+                "expectedLockSha256": lock_sha,
+            }
+        }),
+    );
+    assert_eq!(unpermitted_cat["ok"], false);
+    assert_eq!(unpermitted_cat["error"]["code"], "evidence_refused");
+    assert_eq!(unpermitted_cat["error"]["status"], 409);
+
+    // 3d. retainReceiptsDir outside permittedRoots is refused BEFORE creating directories
+    let escaped_receipts = outside_dir.join("should-not-be-created");
+    let unpermitted_retain = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 42,
+            "method": "init",
+            "params": {
+                "permittedRoots": [data_dir, catalog_dir],
+                "catalogPath": catalog_path,
+                "lockPath": lock_path,
+                "expectedLockSha256": lock_sha,
+                "retainReceiptsDir": escaped_receipts,
+            }
+        }),
+    );
+    assert_eq!(unpermitted_retain["ok"], false);
+    assert_eq!(unpermitted_retain["error"]["code"], "evidence_refused");
+    assert_eq!(unpermitted_retain["error"]["status"], 409);
+    assert!(!escaped_receipts.exists());
+
+    // 3e. Tampered catalog.ddk.json with valid catalog.lock.json is refused (`409 integrity_mismatch`)
+    let tampered_cat_path = catalog_dir.join("tampered-catalog.ddk.json");
+    std::fs::write(
+        &tampered_cat_path,
+        b"{\"kind\":\"catalog\",\"tampered\":true}\n",
+    )
+    .unwrap();
+    let tampered_cat_resp = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 43,
+            "method": "init",
+            "params": {
+                "permittedRoots": [data_dir, catalog_dir, receipts_root],
+                "catalogPath": tampered_cat_path,
+                "lockPath": lock_path,
+                "expectedLockSha256": lock_sha,
+            }
+        }),
+    );
+    assert_eq!(tampered_cat_resp["ok"], false);
+    assert_eq!(tampered_cat_resp["error"]["code"], "integrity_mismatch");
+    assert_eq!(tampered_cat_resp["error"]["status"], 409);
+
+    // 4a. docspecBinary pointing to an arbitrary host file (not current_exe) is refused (`409 evidence_refused`)
+    let non_self_bin = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 44,
+            "method": "init",
+            "params": {
+                "permittedRoots": [data_dir, catalog_dir, receipts_root],
+                "catalogPath": catalog_path,
+                "lockPath": lock_path,
+                "expectedLockSha256": lock_sha,
+                "docspecBinary": lock_path,
+            }
+        }),
+    );
+    assert_eq!(non_self_bin["ok"], false);
+    assert_eq!(non_self_bin["error"]["code"], "evidence_refused");
+    assert_eq!(non_self_bin["error"]["status"], 409);
+
+    // 4b. Tampered docspecSha256 fails with integrity_mismatch (409)
     let bad_bin = send_rpc(
         &mut stdin,
         &mut stdout,
@@ -463,7 +679,7 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
             "id": 5,
             "method": "init",
             "params": {
-                "permittedRoots": [data_dir, catalog_dir],
+                "permittedRoots": [data_dir, catalog_dir, receipts_root],
                 "catalogPath": catalog_path,
                 "lockPath": lock_path,
                 "expectedLockSha256": lock_sha,
@@ -476,7 +692,7 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     assert_eq!(bad_bin["error"]["code"], "integrity_mismatch");
     assert_eq!(bad_bin["error"]["status"], 409);
 
-    // 5. Valid init succeeds and pins binarySha256 + lockSha256
+    // 5. Valid init succeeds and pins binarySha256 + lockSha256 + creates nested retainReceiptsDir inside permittedRoots
     let init_ok = send_rpc(
         &mut stdin,
         &mut stdout,
@@ -484,7 +700,7 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
             "id": 6,
             "method": "init",
             "params": {
-                "permittedRoots": [data_dir, catalog_dir],
+                "permittedRoots": [data_dir, catalog_dir, receipts_root],
                 "catalogPath": catalog_path,
                 "lockPath": lock_path,
                 "expectedLockSha256": lock_sha,
@@ -500,7 +716,52 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     assert_eq!(init_ok["result"]["engine"]["id"], "docspec");
     assert_eq!(init_ok["result"]["engine"]["binarySha256"], bin_sha);
 
-    // 6. read_page across 3 shards (row_group_size=1) with offset=0, limit=4
+    // 6a. read_page refuses shard missing sha256 (`409 integrity_mismatch`)
+    let missing_shard_sha = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 61,
+            "method": "read_page",
+            "params": {
+                "shards": [{"path": full_parquet}],
+                "offset": 0,
+                "limit": 2,
+            }
+        }),
+    );
+    assert_eq!(missing_shard_sha["ok"], false);
+    assert_eq!(missing_shard_sha["error"]["code"], "integrity_mismatch");
+    assert_eq!(missing_shard_sha["error"]["status"], 409);
+
+    // 6b. read_page refuses heterogeneous shard schemas (`422 owner_schema_mismatch`)
+    let hetero_shards = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 62,
+            "method": "read_page",
+            "params": {
+                "shards": [
+                    shards_json[0].clone(),
+                    {
+                        "path": mismatch_shard_path,
+                        "sha256": mismatch_sha,
+                        "byteSize": mismatch_bytes.len(),
+                        "rowCount": 1,
+                        "rowRange": [2, 3]
+                    }
+                ],
+                "offset": 0,
+                "limit": 2,
+            }
+        }),
+    );
+    assert_eq!(hetero_shards["ok"], false);
+    assert_eq!(hetero_shards["error"]["code"], "owner_schema_mismatch");
+    assert_eq!(hetero_shards["error"]["status"], 422);
+
+    // 6c. read_page across 3 shards (row_group_size=1) with offset=0, limit=4
     let page = send_rpc(
         &mut stdin,
         &mut stdout,
@@ -523,7 +784,6 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     let page_rows = page_res["rows"].as_array().unwrap();
     assert_eq!(page_rows.len(), 4);
 
-    // Row 0: Int64 > 2^53-1, Decimal128(24,4) trailing zeros, -0.0, UTC ns timestamp, base64 binary, escaped $number struct
     assert_eq!(page_rows[0]["id"], json!({"$number": "9007199254740995"}));
     assert_eq!(page_rows[0]["amount"], json!({"$number": "12345.6700"}));
     assert_eq!(page_rows[0]["ratio"], json!({"$number": "-0"}));
@@ -539,13 +799,10 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
         page_rows[0]["nested"],
         json!({"$object": [["$number", "raw-escape"], ["label", "row0"]]})
     );
-    // Row 1: negative >2^53-1 Int64 and negative Decimal < 1
     assert_eq!(page_rows[1]["id"], json!({"$number": "-9007199254740995"}));
     assert_eq!(page_rows[1]["amount"], json!({"$number": "-0.0050"}));
-    // Row 2: nulls preserved
     assert_eq!(page_rows[2]["payload"], Value::Null);
     assert_eq!(page_rows[2]["nested"], Value::Null);
-    // Row 3: 20-digit Decimal128(24, 4)
     assert_eq!(
         page_rows[3]["amount"],
         json!({"$number": "1234567890123456.7891"})
@@ -569,7 +826,115 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     assert_eq!(mid_page["result"]["rowPositions"], json!([1, 2, 3]));
     assert_eq!(mid_page["result"]["hasMore"], true);
 
-    // 8. run_query in-process with 64-bit integer `?` and 20-digit Decimal `$min_amount` + retained receipt
+    // 8a. run_query refuses omitted input sha256 (`409 integrity_mismatch`)
+    let no_in_sha = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 81,
+            "method": "run_query",
+            "params": {
+                "recipeId": "urn:recipe:high-precision",
+                "expectedSqlSha256": sql_sha,
+                "versions": {"ledger": "urn:ver:ledger:v1"},
+                "inputs": {
+                    "ledger": {
+                        "path": full_parquet,
+                        "versionId": "urn:ver:ledger:v1"
+                    }
+                },
+                "parameters": {"min_id": 42, "min_amount": 100},
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(no_in_sha["ok"], false);
+    assert_eq!(no_in_sha["error"]["code"], "integrity_mismatch");
+    assert_eq!(no_in_sha["error"]["status"], 409);
+
+    // 8b. run_query refuses substituting another permitted Parquet file for a pinned version (`409 binding_mismatch`)
+    let swapped_input = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 82,
+            "method": "run_query",
+            "params": {
+                "recipeId": "urn:recipe:high-precision",
+                "expectedSqlSha256": sql_sha,
+                "versions": {"ledger": "urn:ver:ledger:v1"},
+                "inputs": {
+                    "ledger": {
+                        "path": shards_json[0]["path"],
+                        "sha256": shards_json[0]["sha256"],
+                        "versionId": "urn:ver:ledger:v1"
+                    }
+                },
+                "parameters": {"min_id": 42, "min_amount": 100},
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(swapped_input["ok"], false);
+    assert_eq!(swapped_input["error"]["code"], "binding_mismatch");
+    assert_eq!(swapped_input["error"]["status"], 409);
+
+    // 8c. run_query refuses non-boolean wrapLimit (`400 invalid_request`) and mismatched rawNumericParameters (`400 invalid_parameters`)
+    let bad_wrap = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 83,
+            "method": "run_query",
+            "params": {
+                "recipeId": "urn:recipe:high-precision",
+                "expectedSqlSha256": sql_sha,
+                "versions": {"ledger": "urn:ver:ledger:v1"},
+                "inputs": {
+                    "ledger": {
+                        "path": full_parquet,
+                        "sha256": full_sha,
+                        "versionId": "urn:ver:ledger:v1"
+                    }
+                },
+                "parameters": {"min_id": 42, "min_amount": 100},
+                "wrapLimit": "false",
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(bad_wrap["ok"], false);
+    assert_eq!(bad_wrap["error"]["code"], "invalid_request");
+    assert_eq!(bad_wrap["error"]["status"], 400);
+
+    let mismatched_raw = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 84,
+            "method": "run_query",
+            "params": {
+                "recipeId": "urn:recipe:high-precision",
+                "expectedSqlSha256": sql_sha,
+                "versions": {"ledger": "urn:ver:ledger:v1"},
+                "inputs": {
+                    "ledger": {
+                        "path": full_parquet,
+                        "sha256": full_sha,
+                        "versionId": "urn:ver:ledger:v1"
+                    }
+                },
+                "parameters": {"min_id": 42, "min_amount": 100},
+                "rawNumericParameters": {"min_id": "999999"},
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(mismatched_raw["ok"], false);
+    assert_eq!(mismatched_raw["error"]["code"], "invalid_parameters");
+    assert_eq!(mismatched_raw["error"]["status"], 400);
+
+    // 8d. run_query in-process with 64-bit integer `?` and 20-digit Decimal `$min_amount` + retained receipt
     let query_resp = send_rpc(
         &mut stdin,
         &mut stdout,
@@ -624,6 +989,45 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     assert_eq!(rec_json["kind"], "docspec-owner-query-receipt");
     assert_eq!(rec_json["recipeId"], "urn:recipe:high-precision");
     assert_eq!(rec_json["returned"], 1);
+
+    // 8e. Adversarial SQL recipe with nested block comments, E'a\'b', backticks, $$a'b$$,
+    //     trailing comment after `;`, <=15-digit exact Decimal128 (`12345.6700`), and union type
+    let inj_payload = "*/ UNION ALL SELECT 999, 0, 'x', 'y', 'z', 0 --";
+    let adv_resp = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 91,
+            "method": "run_query",
+            "params": {
+                "recipeId": "urn:recipe:adversarial",
+                "expectedSqlSha256": adv_sql_sha,
+                "versions": {"ledger": "urn:ver:ledger:v1"},
+                "inputs": {
+                    "ledger": {
+                        "path": full_parquet,
+                        "sha256": full_sha,
+                        "versionId": "urn:ver:ledger:v1"
+                    }
+                },
+                "parameters": {
+                    "inj": inj_payload,
+                    "exact_dec": {"$number": "12345.6700"},
+                    "code": 77
+                },
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(adv_resp["ok"], true, "{adv_resp}");
+    let adv_rows = adv_resp["result"]["rows"].as_array().unwrap();
+    assert_eq!(adv_rows.len(), 1);
+    assert_eq!(adv_rows[0]["id"], json!({"$number": "9007199254740995"}));
+    assert_eq!(adv_rows[0]["amount"], json!({"$number": "12345.6700"}));
+    assert_eq!(adv_rows[0]["esc_lit"], json!("a'b :inj"));
+    assert_eq!(adv_rows[0]["dollar_lit"], json!("a'b $exact_dec"));
+    assert_eq!(adv_rows[0]["bound_payload"], json!(inj_payload));
+    assert_eq!(adv_rows[0]["bound_code"], json!({"$number": "77"}));
 
     // 9. same_release relationship without releaseId is refused with native_scope_refused (409)
     let scope_err = send_rpc(

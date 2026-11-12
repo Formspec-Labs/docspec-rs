@@ -1,7 +1,14 @@
 // Rust guideline compliant 2026-02-21
-//! Recipe parameter JSON Schema validation and safe SQL literal substitution.
+//! Recipe parameter JSON Schema validation and lexer-safe DataFusion parameter binding.
 
 use super::exact::{BridgeError, valid_integer_lexeme, valid_json_number};
+use datafusion::{
+    common::ScalarValue,
+    sql::sqlparser::{
+        dialect::GenericDialect,
+        tokenizer::{Location, Token, Tokenizer},
+    },
+};
 use serde_json::{Map, Value};
 use std::{cmp::Ordering, collections::BTreeMap};
 
@@ -123,17 +130,24 @@ fn values_equal_for_schema(actual: &Value, actual_lex: Option<&str>, expected: &
 }
 
 /// Normalized parameter map paired with exact raw numeric lexemes.
-pub type NormalizedParameters = (BTreeMap<String, Value>, BTreeMap<String, String>);
+pub(super) type NormalizedParameters = (BTreeMap<String, Value>, BTreeMap<String, String>);
 
 /// Normalizes incoming `parameters` and `rawNumericParameters`, extracting any
-/// `{ "$number": "<lex>" }` wrappers so both `docspec-owner.ts` and direct callers work.
-pub fn normalize_incoming_parameters(
+/// `{ "$number": "<lex>" }` wrappers and verifying consistency between both maps.
+pub(super) fn normalize_incoming_parameters(
     raw_params: &Map<String, Value>,
     raw_numeric: &Map<String, Value>,
 ) -> Result<NormalizedParameters, BridgeError> {
     let mut params = BTreeMap::new();
     let mut lexemes = BTreeMap::new();
     for (k, v) in raw_numeric {
+        let Some(param_val) = raw_params.get(k) else {
+            return Err(BridgeError::new(
+                "invalid_parameters",
+                format!("rawNumericParameters[{k:?}] has no matching entry in parameters."),
+                400,
+            ));
+        };
         let Some(s) = v.as_str() else {
             return Err(BridgeError::new(
                 "invalid_parameters",
@@ -147,6 +161,58 @@ pub fn normalize_incoming_parameters(
                 format!("rawNumericParameters[{k:?}] is not a valid JSON number."),
                 400,
             ));
+        }
+        match param_val {
+            Value::Number(n) => {
+                let raw_f = s
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|f| f.is_finite())
+                    .ok_or_else(|| {
+                        BridgeError::new(
+                            "invalid_parameters",
+                            format!("rawNumericParameters[{k:?}] exceeds finite bounds."),
+                            400,
+                        )
+                    })?;
+                let param_f = n.as_f64().filter(|f| f.is_finite()).ok_or_else(|| {
+                    BridgeError::new(
+                        "invalid_parameters",
+                        format!("Numeric parameter {k:?} exceeds finite bounds."),
+                        400,
+                    )
+                })?;
+                let consistent = raw_f == param_f
+                    || ((raw_f - param_f).abs() <= raw_f.abs() * (2.0 * f64::EPSILON));
+                if !consistent {
+                    return Err(BridgeError::new(
+                        "invalid_parameters",
+                        format!("rawNumericParameters[{k:?}] disagrees with parameters[{k:?}]."),
+                        400,
+                    ));
+                }
+            }
+            Value::Object(obj)
+                if obj.len() == 1 && obj.get("$number").and_then(Value::as_str).is_some() =>
+            {
+                let inner = obj.get("$number").and_then(Value::as_str).unwrap_or("");
+                if compare_numeric_lexemes(s, inner) != Some(Ordering::Equal) {
+                    return Err(BridgeError::new(
+                        "invalid_parameters",
+                        format!("rawNumericParameters[{k:?}] disagrees with parameters[{k:?}]."),
+                        400,
+                    ));
+                }
+            }
+            _ => {
+                return Err(BridgeError::new(
+                    "invalid_parameters",
+                    format!(
+                        "rawNumericParameters[{k:?}] conflicts with non-numeric parameter value."
+                    ),
+                    400,
+                ));
+            }
         }
         lexemes.insert(k.clone(), s.to_owned());
     }
@@ -186,17 +252,13 @@ pub fn normalize_incoming_parameters(
 
 fn check_single_type(type_name: &str, val: &Value, raw_lex: Option<&str>) -> bool {
     match type_name {
-        "null" => val.is_null(),
-        "boolean" => val.is_boolean(),
-        "string" => val.is_string(),
+        "null" => val.is_null() && raw_lex.is_none(),
+        "boolean" => val.is_boolean() && raw_lex.is_none(),
+        "string" => val.is_string() && raw_lex.is_none(),
         "integer" => {
             if let Some(lex) = raw_lex {
-                valid_integer_lexeme(lex)
-            } else if let Some(n) = val.as_i64() {
-                let _ = n;
-                true
-            } else if let Some(n) = val.as_u64() {
-                let _ = n;
+                val.is_number() && valid_integer_lexeme(lex)
+            } else if val.is_i64() || val.is_u64() {
                 true
             } else if let Some(f) = val.as_f64() {
                 f.is_finite() && f.fract() == 0.0
@@ -204,15 +266,15 @@ fn check_single_type(type_name: &str, val: &Value, raw_lex: Option<&str>) -> boo
                 false
             }
         }
-        "number" => value_numeric_lexeme(val, raw_lex).is_some(),
-        "array" => val.is_array(),
-        "object" => val.is_object(),
+        "number" => val.is_number() && value_numeric_lexeme(val, raw_lex).is_some(),
+        "array" => val.is_array() && raw_lex.is_none(),
+        "object" => val.is_object() && raw_lex.is_none(),
         _ => false,
     }
 }
 
 /// Validates recipe `parameters` against the recipe's JSON Schema object.
-pub fn validate_parameters_schema(
+pub(super) fn validate_parameters_schema(
     parameters: &BTreeMap<String, Value>,
     raw_lexemes: &BTreeMap<String, String>,
     schema: Option<&Value>,
@@ -374,126 +436,188 @@ pub fn validate_parameters_schema(
     Ok(())
 }
 
-fn sql_literal(
+fn parameter_scalar_value(
     value: &Value,
     prop_schema: Option<&Map<String, Value>>,
     raw_lexeme: Option<&str>,
-) -> Result<String, BridgeError> {
-    let declared_type = prop_schema
-        .and_then(|p| p.get("type"))
-        .and_then(|t| match t {
-            Value::String(s) => Some(s.as_str()),
-            Value::Array(arr) => arr.iter().filter_map(Value::as_str).find(|&s| s != "null"),
-            _ => None,
-        });
+) -> Result<ScalarValue, BridgeError> {
+    let allowed_types: Vec<&str> = match prop_schema.and_then(|p| p.get("type")) {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Array(arr)) => arr.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
 
     if value.is_null() {
-        return Ok("NULL".to_owned());
-    }
-
-    if declared_type == Some("boolean") || (declared_type.is_none() && value.is_boolean()) {
-        let Some(b) = value.as_bool() else {
-            return Err(BridgeError::new(
-                "invalid_parameters",
-                "Expected boolean recipe parameter.",
-                400,
-            ));
-        };
-        return Ok(if b {
-            "TRUE".to_owned()
-        } else {
-            "FALSE".to_owned()
+        let non_null: Vec<&str> = allowed_types
+            .iter()
+            .copied()
+            .filter(|&t| t != "null")
+            .collect();
+        return Ok(match non_null.as_slice() {
+            ["boolean"] => ScalarValue::Boolean(None),
+            ["integer"] => ScalarValue::Int64(None),
+            ["number"] => ScalarValue::Float64(None),
+            ["string"] => ScalarValue::Utf8(None),
+            _ => ScalarValue::Null,
         });
     }
 
-    if declared_type == Some("integer") {
-        let lex_owned;
-        let lex = if let Some(raw) = raw_lexeme {
-            raw
-        } else if let Some(i) = value.as_i64() {
-            lex_owned = i.to_string();
-            &lex_owned
-        } else if let Some(u) = value.as_u64() {
-            lex_owned = u.to_string();
-            &lex_owned
+    let resolved_type = if allowed_types.is_empty() {
+        if value.is_boolean() {
+            "boolean"
+        } else if value.is_string() {
+            "string"
+        } else if raw_lexeme.is_some_and(valid_integer_lexeme)
+            || (raw_lexeme.is_none() && (value.is_i64() || value.is_u64()))
+        {
+            "integer"
+        } else if value.is_number() || raw_lexeme.is_some() {
+            "number"
         } else {
             return Err(BridgeError::new(
                 "invalid_parameters",
-                "Expected exact integer recipe parameter.",
-                400,
-            ));
-        };
-        if !valid_integer_lexeme(lex) {
-            return Err(BridgeError::new(
-                "invalid_parameters",
-                "Expected exact integer recipe parameter.",
+                "Unsupported recipe parameter value.",
                 400,
             ));
         }
-        if let Ok(val_i64) = lex.parse::<i64>() {
-            if val_i64 == i64::MIN {
-                return Ok(format!("CAST('{val_i64}' AS BIGINT)"));
-            }
-            return Ok(format!("CAST({val_i64} AS BIGINT)"));
-        }
-        return Ok(lex.to_owned());
-    }
+    } else if allowed_types.contains(&"boolean") && check_single_type("boolean", value, raw_lexeme)
+    {
+        "boolean"
+    } else if allowed_types.contains(&"integer") && check_single_type("integer", value, raw_lexeme)
+    {
+        "integer"
+    } else if allowed_types.contains(&"number") && check_single_type("number", value, raw_lexeme) {
+        "number"
+    } else if allowed_types.contains(&"string") && check_single_type("string", value, raw_lexeme) {
+        "string"
+    } else {
+        return Err(BridgeError::new(
+            "invalid_parameters",
+            format!("Unsupported or mismatched recipe parameter type: {allowed_types:?}"),
+            400,
+        ));
+    };
 
-    if declared_type == Some("number") || (declared_type.is_none() && value.is_number()) {
-        let Some(lex) = value_numeric_lexeme(value, raw_lexeme) else {
-            return Err(BridgeError::new(
-                "invalid_parameters",
-                "Expected exact numeric recipe parameter.",
-                400,
-            ));
-        };
-        if !lex.contains(['e', 'E']) {
-            let unsigned = lex.strip_prefix('-').unwrap_or(lex.as_str());
-            let (int_part, dot, frac_part) = match unsigned.split_once('.') {
-                Some((i, f)) => (i, true, f),
-                None => (unsigned, false, ""),
+    match resolved_type {
+        "boolean" => {
+            let Some(b) = value.as_bool() else {
+                return Err(BridgeError::new(
+                    "invalid_parameters",
+                    "Expected boolean recipe parameter.",
+                    400,
+                ));
             };
-            let combined = format!("{int_part}{frac_part}");
-            let trimmed_sig = combined.trim_start_matches('0');
-            let sig_len = if trimmed_sig.is_empty() {
-                1
+            Ok(ScalarValue::Boolean(Some(b)))
+        }
+        "integer" => {
+            let lex_owned;
+            let lex = if let Some(raw) = raw_lexeme {
+                raw
+            } else if let Some(i) = value.as_i64() {
+                lex_owned = i.to_string();
+                &lex_owned
+            } else if let Some(u) = value.as_u64() {
+                lex_owned = u.to_string();
+                &lex_owned
+            } else if let Some(f) = value.as_f64()
+                && f.is_finite()
+                && f.fract() == 0.0
+                && f >= (i64::MIN as f64)
+                && f < (i64::MAX as f64)
+            {
+                lex_owned = (f as i64).to_string();
+                &lex_owned
             } else {
-                trimmed_sig.len()
+                return Err(BridgeError::new(
+                    "invalid_parameters",
+                    "Expected exact integer recipe parameter.",
+                    400,
+                ));
             };
-            let scale = if dot { frac_part.len() } else { 0 };
-            let int_sig_len = int_part.trim_start_matches('0').len();
-            let precision = (int_sig_len + scale).max(scale + 1).max(1);
-            if sig_len > 15 && precision <= 38 {
-                return Ok(format!("CAST('{lex}' AS DECIMAL({precision}, {scale}))"));
+            if !valid_integer_lexeme(lex) {
+                return Err(BridgeError::new(
+                    "invalid_parameters",
+                    "Expected exact integer recipe parameter.",
+                    400,
+                ));
             }
+            let val_i64 = lex.parse::<i64>().map_err(|_| {
+                BridgeError::new(
+                    "invalid_parameters",
+                    "Integer recipe parameter overflows signed 64-bit integer range.",
+                    400,
+                )
+            })?;
+            Ok(ScalarValue::Int64(Some(val_i64)))
         }
-        return Ok(format!("CAST({lex} AS DOUBLE)"));
-    }
-
-    if declared_type == Some("string") || (declared_type.is_none() && value.is_string()) {
-        let Some(text) = value.as_str() else {
-            return Err(BridgeError::new(
-                "invalid_parameters",
-                "Expected string recipe parameter.",
-                400,
-            ));
-        };
-        if text.contains('\0') {
-            return Err(BridgeError::new(
-                "invalid_parameters",
-                "NUL bytes are not permitted in SQL string parameters.",
-                400,
-            ));
+        "number" => {
+            let Some(lex) = value_numeric_lexeme(value, raw_lexeme) else {
+                return Err(BridgeError::new(
+                    "invalid_parameters",
+                    "Expected exact numeric recipe parameter.",
+                    400,
+                ));
+            };
+            if !lex.contains(['e', 'E']) {
+                let neg = lex.starts_with('-');
+                let unsigned = lex.strip_prefix('-').unwrap_or(lex.as_str());
+                let (int_part, frac_part) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+                let scale = frac_part.len();
+                let int_sig_len = int_part.trim_start_matches('0').len();
+                let precision = (int_sig_len + scale).max(scale).max(1);
+                if precision <= 38 && scale <= 38 {
+                    let digits_str = format!("{int_part}{frac_part}");
+                    let mag = digits_str.parse::<i128>().map_err(|_| {
+                        BridgeError::new(
+                            "invalid_parameters",
+                            "Decimal recipe parameter exceeds 128-bit precision.",
+                            400,
+                        )
+                    })?;
+                    let signed = if neg && mag != 0 { -mag } else { mag };
+                    return Ok(ScalarValue::Decimal128(
+                        Some(signed),
+                        precision as u8,
+                        scale as i8,
+                    ));
+                }
+            }
+            let parsed_f = lex
+                .parse::<f64>()
+                .ok()
+                .filter(|f| f.is_finite())
+                .ok_or_else(|| {
+                    BridgeError::new(
+                        "invalid_parameters",
+                        "Numeric recipe parameter exceeds finite IEEE-754 bounds.",
+                        400,
+                    )
+                })?;
+            Ok(ScalarValue::Float64(Some(parsed_f)))
         }
-        let escaped = text.replace('\'', "''");
-        return Ok(format!("'{escaped}'"));
+        "string" => {
+            let Some(text) = value.as_str() else {
+                return Err(BridgeError::new(
+                    "invalid_parameters",
+                    "Expected string recipe parameter.",
+                    400,
+                ));
+            };
+            if text.contains('\0') {
+                return Err(BridgeError::new(
+                    "invalid_parameters",
+                    "NUL bytes are not permitted in SQL string parameters.",
+                    400,
+                ));
+            }
+            Ok(ScalarValue::Utf8(Some(text.to_owned())))
+        }
+        _ => Err(BridgeError::new(
+            "invalid_parameters",
+            format!("Unsupported recipe parameter type: {resolved_type:?}"),
+            400,
+        )),
     }
-
-    Err(BridgeError::new(
-        "invalid_parameters",
-        format!("Unsupported recipe parameter type: {declared_type:?}"),
-        400,
-    ))
 }
 
 fn is_ident_start(byte: u8) -> bool {
@@ -504,185 +628,239 @@ fn is_ident_continue(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
-/// Substitutes `?`, `$1..$N`, `:name`, and `$name` outside SQL strings, identifiers,
-/// comments, and `::` cast operators.
-pub fn bind_sql_parameters(
+fn choose_placeholder_prefix(sql_text: &str) -> String {
+    let mut candidate = "_ddk_p".to_owned();
+    let mut suffix = 0u32;
+    while sql_text.contains(&candidate) {
+        suffix = suffix.saturating_add(1);
+        candidate = format!("_ddk_p{suffix}_");
+    }
+    candidate
+}
+
+struct LocationCursor<'a> {
+    sql_len: usize,
+    chars: std::iter::Peekable<std::str::CharIndices<'a>>,
+    line: u64,
+    col: u64,
+}
+
+impl<'a> LocationCursor<'a> {
+    fn new(sql_text: &'a str) -> Self {
+        Self {
+            sql_len: sql_text.len(),
+            chars: sql_text.char_indices().peekable(),
+            line: 1,
+            col: 1,
+        }
+    }
+
+    fn advance_to(&mut self, target: Location) -> Result<usize, BridgeError> {
+        while (self.line, self.col) < (target.line, target.column) {
+            let Some((_, ch)) = self.chars.next() else {
+                if (self.line, self.col) == (target.line, target.column) {
+                    return Ok(self.sql_len);
+                }
+                return Err(BridgeError::new(
+                    "native_read_refused",
+                    "SQL tokenizer location exceeded input bounds.",
+                    409,
+                ));
+            };
+            if ch == '\n' {
+                self.line += 1;
+                self.col = 1;
+            } else {
+                self.col += 1;
+            }
+        }
+        if (self.line, self.col) != (target.line, target.column) {
+            return Err(BridgeError::new(
+                "native_read_refused",
+                "Non-monotonic SQL token span encountered.",
+                409,
+            ));
+        }
+        Ok(self.chars.peek().map_or(self.sql_len, |&(idx, _)| idx))
+    }
+}
+
+/// Tokenizes `sql_text` with DataFusion's `GenericDialect`, strips an optional trailing
+/// semicolon without mutating literals or comments, and rewrites `?`, `$1..$N`, `:name`,
+/// and `$name` tokens into native DataFusion `ScalarValue` parameter bindings.
+pub(super) fn prepare_sql_parameters(
     sql_text: &str,
     parameters: &BTreeMap<String, Value>,
     raw_lexemes: &BTreeMap<String, String>,
     param_schema: Option<&Value>,
     parameter_order: Option<&[String]>,
-) -> Result<String, BridgeError> {
+) -> Result<(String, Vec<(String, ScalarValue)>), BridgeError> {
     let props = param_schema
         .and_then(Value::as_object)
         .and_then(|s| s.get("properties"))
         .and_then(Value::as_object);
-    let bytes = sql_text.as_bytes();
-    let n = bytes.len();
-    let mut out = String::with_capacity(n + 64);
-    let mut i = 0usize;
+
+    let dialect = GenericDialect {};
+    let tokens = Tokenizer::new(&dialect, sql_text)
+        .tokenize_with_location()
+        .map_err(|err| {
+            BridgeError::new(
+                "native_read_refused",
+                format!("Invalid recipe SQL syntax: {err}"),
+                409,
+            )
+        })?;
+
+    let last_non_ws = tokens
+        .iter()
+        .rposition(|t| !matches!(t.token, Token::Whitespace(_)));
+
+    let prefix = choose_placeholder_prefix(sql_text);
+    let mut replacements: Vec<(Location, Location, String)> = Vec::new();
+    let mut bound_values: Vec<(String, ScalarValue)> = Vec::new();
     let mut qmark_index = 0usize;
 
-    while i < n {
-        let b = bytes[i];
-        // Single-quoted string literal '...'
-        if b == b'\'' {
-            let start = i;
-            i += 1;
-            while i < n {
-                if bytes[i] == b'\'' {
-                    i += 1;
-                    if i < n && bytes[i] == b'\'' {
-                        i += 1;
-                        continue;
-                    }
-                    break;
+    let bind_named = |name: &str,
+                      start: Location,
+                      end: Location,
+                      replacements: &mut Vec<(Location, Location, String)>,
+                      bound_values: &mut Vec<(String, ScalarValue)>|
+     -> Result<(), BridgeError> {
+        let Some(val) = parameters.get(name) else {
+            return Err(BridgeError::new(
+                "invalid_parameters",
+                format!("Missing value for parameter {name:?}."),
+                400,
+            ));
+        };
+        let prop_map = props.and_then(|p| p.get(name)).and_then(Value::as_object);
+        let scalar =
+            parameter_scalar_value(val, prop_map, raw_lexemes.get(name).map(String::as_str))?;
+        let slot_id = format!("{prefix}{}", bound_values.len() + 1);
+        replacements.push((start, end, format!("${slot_id}")));
+        bound_values.push((slot_id, scalar));
+        Ok(())
+    };
+
+    let mut idx = 0usize;
+    while idx < tokens.len() {
+        let tok = &tokens[idx];
+        match &tok.token {
+            Token::SemiColon => {
+                if Some(idx) != last_non_ws {
+                    return Err(BridgeError::new(
+                        "native_read_refused",
+                        "Multiple SQL statements are not permitted in owner recipes.",
+                        409,
+                    ));
                 }
-                i += 1;
+                replacements.push((tok.span.start, tok.span.end, String::new()));
+                idx += 1;
             }
-            out.push_str(&sql_text[start..i]);
-            continue;
-        }
-        // Double-quoted identifier "..."
-        if b == b'"' {
-            let start = i;
-            i += 1;
-            while i < n {
-                if bytes[i] == b'"' {
-                    i += 1;
-                    if i < n && bytes[i] == b'"' {
-                        i += 1;
-                        continue;
-                    }
-                    break;
-                }
-                i += 1;
-            }
-            out.push_str(&sql_text[start..i]);
-            continue;
-        }
-        // Line comment --
-        if b == b'-' && i + 1 < n && bytes[i + 1] == b'-' {
-            let start = i;
-            i += 2;
-            while i < n && bytes[i] != b'\n' {
-                i += 1;
-            }
-            out.push_str(&sql_text[start..i]);
-            continue;
-        }
-        // Block comment /* ... */
-        if b == b'/' && i + 1 < n && bytes[i + 1] == b'*' {
-            let start = i;
-            i += 2;
-            while i + 1 < n && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                i += 1;
-            }
-            i = n.min(i + 2);
-            out.push_str(&sql_text[start..i]);
-            continue;
-        }
-        // Positional ? placeholder
-        if b == b'?' {
-            let Some(order) = parameter_order.filter(|o| qmark_index < o.len()) else {
-                return Err(BridgeError::new(
-                    "invalid_parameters",
-                    "Positional SQL placeholder has no matching parameterOrder entry.",
-                    400,
-                ));
-            };
-            let name = &order[qmark_index];
-            qmark_index += 1;
-            let Some(val) = parameters.get(name) else {
-                return Err(BridgeError::new(
-                    "invalid_parameters",
-                    format!("Missing value for parameter {name:?}."),
-                    400,
-                ));
-            };
-            let prop_map = props.and_then(|p| p.get(name)).and_then(Value::as_object);
-            out.push_str(&sql_literal(
-                val,
-                prop_map,
-                raw_lexemes.get(name).map(String::as_str),
-            )?);
-            i += 1;
-            continue;
-        }
-        // PostgreSQL / DataFusion :: cast operator
-        if b == b':' && i + 1 < n && bytes[i + 1] == b':' {
-            out.push_str("::");
-            i += 2;
-            continue;
-        }
-        // $1..$N or $name or :name
-        if (b == b':' || b == b'$') && i + 1 < n {
-            if b == b'$' && matches!(bytes[i + 1], b'1'..=b'9') {
-                let mut end = i + 2;
-                while end < n && bytes[end].is_ascii_digit() {
-                    end += 1;
-                }
-                if end == n || !is_ident_continue(bytes[end]) {
-                    let pos_1 = sql_text[i + 1..end].parse::<usize>().map_err(|_| {
-                        BridgeError::new(
-                            "invalid_parameters",
-                            "Positional parameter index overflow.",
-                            400,
-                        )
-                    })?;
-                    let idx = pos_1 - 1;
-                    let Some(order) = parameter_order.filter(|o| idx < o.len()) else {
+            Token::Placeholder(raw_ph) => {
+                if raw_ph == "?" {
+                    let Some(order) = parameter_order.filter(|o| qmark_index < o.len()) else {
                         return Err(BridgeError::new(
                             "invalid_parameters",
-                            format!("Positional parameter ${pos_1} is out of range."),
+                            "Positional SQL placeholder has no matching parameterOrder entry.",
                             400,
                         ));
                     };
-                    let name = &order[idx];
-                    let Some(val) = parameters.get(name) else {
+                    let name = &order[qmark_index];
+                    qmark_index += 1;
+                    bind_named(
+                        name,
+                        tok.span.start,
+                        tok.span.end,
+                        &mut replacements,
+                        &mut bound_values,
+                    )?;
+                } else if let Some(rest) = raw_ph.strip_prefix('$') {
+                    if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) {
+                        let pos_1 = rest.parse::<usize>().map_err(|_| {
+                            BridgeError::new(
+                                "invalid_parameters",
+                                "Positional parameter index overflow.",
+                                400,
+                            )
+                        })?;
+                        if pos_1 == 0 {
+                            return Err(BridgeError::new(
+                                "invalid_parameters",
+                                "Positional parameter $0 is out of range.",
+                                400,
+                            ));
+                        }
+                        let order_idx = pos_1 - 1;
+                        let Some(order) = parameter_order.filter(|o| order_idx < o.len()) else {
+                            return Err(BridgeError::new(
+                                "invalid_parameters",
+                                format!("Positional parameter ${pos_1} is out of range."),
+                                400,
+                            ));
+                        };
+                        bind_named(
+                            &order[order_idx],
+                            tok.span.start,
+                            tok.span.end,
+                            &mut replacements,
+                            &mut bound_values,
+                        )?;
+                    } else if let Some(&first) = rest.as_bytes().first()
+                        && is_ident_start(first)
+                        && rest.as_bytes()[1..].iter().copied().all(is_ident_continue)
+                    {
+                        bind_named(
+                            rest,
+                            tok.span.start,
+                            tok.span.end,
+                            &mut replacements,
+                            &mut bound_values,
+                        )?;
+                    } else {
                         return Err(BridgeError::new(
                             "invalid_parameters",
-                            format!("Missing value for parameter {name:?}."),
+                            format!("Unsupported SQL placeholder {raw_ph:?}."),
                             400,
                         ));
-                    };
-                    let prop_map = props.and_then(|p| p.get(name)).and_then(Value::as_object);
-                    out.push_str(&sql_literal(
-                        val,
-                        prop_map,
-                        raw_lexemes.get(name).map(String::as_str),
-                    )?);
-                    i = end;
-                    continue;
-                }
-            }
-            if is_ident_start(bytes[i + 1]) {
-                let mut end = i + 2;
-                while end < n && is_ident_continue(bytes[end]) {
-                    end += 1;
-                }
-                let name = &sql_text[i + 1..end];
-                let Some(val) = parameters.get(name) else {
+                    }
+                } else {
                     return Err(BridgeError::new(
                         "invalid_parameters",
-                        format!("Missing value for parameter {name:?}."),
+                        format!("Unsupported SQL placeholder {raw_ph:?}."),
                         400,
                     ));
-                };
-                let prop_map = props.and_then(|p| p.get(name)).and_then(Value::as_object);
-                out.push_str(&sql_literal(
-                    val,
-                    prop_map,
-                    raw_lexemes.get(name).map(String::as_str),
-                )?);
-                i = end;
-                continue;
+                }
+                idx += 1;
+            }
+            Token::Colon => {
+                if let Some(next_tok) = tokens.get(idx + 1)
+                    && tok.span.end == next_tok.span.start
+                    && let Token::Word(word) = &next_tok.token
+                    && word.quote_style.is_none()
+                    && let Some(&first) = word.value.as_bytes().first()
+                    && is_ident_start(first)
+                    && word.value.as_bytes()[1..]
+                        .iter()
+                        .copied()
+                        .all(is_ident_continue)
+                {
+                    bind_named(
+                        &word.value,
+                        tok.span.start,
+                        next_tok.span.end,
+                        &mut replacements,
+                        &mut bound_values,
+                    )?;
+                    idx += 2;
+                    continue;
+                }
+                idx += 1;
+            }
+            _ => {
+                idx += 1;
             }
         }
-        // Copy one UTF-8 character safely
-        let ch = sql_text[i..].chars().next().expect("i < n");
-        out.push(ch);
-        i += ch.len_utf8();
     }
 
     if let Some(order) = parameter_order
@@ -697,21 +875,23 @@ pub fn bind_sql_parameters(
         ));
     }
 
-    Ok(out)
-}
+    if replacements.is_empty() {
+        return Ok((sql_text.to_owned(), bound_values));
+    }
 
-pub fn strip_trailing_semicolon(sql_text: &str) -> String {
-    let mut lines: Vec<&str> = sql_text.lines().collect();
-    while lines.last().is_some_and(|line| line.trim().is_empty()) {
-        lines.pop();
+    let mut cursor = LocationCursor::new(sql_text);
+    let mut out = String::with_capacity(sql_text.len() + bound_values.len() * 8);
+    let mut prev_byte = 0usize;
+    for (start_loc, end_loc, replacement) in replacements {
+        let start_byte = cursor.advance_to(start_loc)?;
+        let end_byte = cursor.advance_to(end_loc)?;
+        out.push_str(&sql_text[prev_byte..start_byte]);
+        out.push_str(&replacement);
+        prev_byte = end_byte;
     }
-    let joined = lines.join("\n");
-    let trimmed = joined.trim_end();
-    if let Some(without_semi) = trimmed.strip_suffix(';') {
-        without_semi.trim_end().to_owned()
-    } else {
-        trimmed.to_owned()
-    }
+    out.push_str(&sql_text[prev_byte..]);
+
+    Ok((out, bound_values))
 }
 
 #[cfg(test)]
@@ -720,7 +900,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn binds_positional_and_named_parameters_skipping_strings_comments_and_casts() {
+    fn binds_parameters_safely_across_nested_comments_escaped_strings_and_exact_decimals() {
         let schema = json!({
             "type": "object",
             "required": ["region", "min_id", "min_total", "active"],
@@ -733,33 +913,124 @@ mod tests {
             }
         });
         let raw_p = json!({
-            "region": "us'east",
+            "region": "*/ UNION ALL SELECT secret FROM other --",
             "min_id": { "$number": "9007199254740993" },
-            "min_total": { "$number": "1234567890123456.7891" },
+            "min_total": { "$number": "0.1" },
             "active": true
         });
         let (params, lexemes) =
             normalize_incoming_parameters(raw_p.as_object().unwrap(), &Map::new()).unwrap();
         validate_parameters_schema(&params, &lexemes, Some(&schema)).unwrap();
 
-        let sql = "SELECT '?' AS lit, col::TEXT, \"$region\" -- ? $min_id\nFROM t /* :min_id */ WHERE r = ? AND id >= $min_id AND total >= :min_total AND ok = $4;";
         let order = vec![
             "region".to_owned(),
             "min_id".to_owned(),
             "min_total".to_owned(),
             "active".to_owned(),
         ];
-        // Note: qmark_index == 1 != 4 fails positional count check when mixed with named;
-        // pure named/dollar-positional or full ? list succeeds:
-        assert!(bind_sql_parameters(sql, &params, &lexemes, Some(&schema), Some(&order)).is_err());
 
-        let sql_named = "SELECT '?' AS lit, col::TEXT, \"$region\" -- $min_id\nFROM t /* :min_id */ WHERE r = $1 AND id >= $min_id AND total >= :min_total AND ok = $4;";
-        let bound =
-            bind_sql_parameters(sql_named, &params, &lexemes, Some(&schema), Some(&order)).unwrap();
-        assert!(bound.contains("'us''east'"));
-        assert!(bound.contains("CAST(9007199254740993 AS BIGINT)"));
-        assert!(bound.contains("CAST('1234567890123456.7891' AS DECIMAL(20, 4))"));
-        assert!(bound.contains("ok = TRUE"));
-        assert!(!strip_trailing_semicolon(&bound).ends_with(';'));
+        // Mixed `?` (count=1) with `parameterOrder` len 4 is rejected
+        let mixed_sql = "SELECT col FROM t WHERE r = ? AND id >= $min_id;";
+        assert!(
+            prepare_sql_parameters(mixed_sql, &params, &lexemes, Some(&schema), Some(&order))
+                .is_err()
+        );
+
+        // Adversarial SQL with E'a\'b', backticks, $$a'b$$, nested /* /* */ :region */, \r\n inside literal, and trailing comment after `;`
+        let adversarial_sql = "SELECT E'a\\'b', 'line1\r\n:min_id', `owner's :region`, $$a'b :min_total$$, col::TEXT \
+                               /* outer /* inner */ :region */ \
+                               FROM t WHERE r = $1 AND id >= $min_id AND total >= :min_total AND ok = $4;\n-- trailing comment\n";
+        let (rewritten, bound) = prepare_sql_parameters(
+            adversarial_sql,
+            &params,
+            &lexemes,
+            Some(&schema),
+            Some(&order),
+        )
+        .unwrap();
+
+        // \r\n inside literal and nested comment content remain untouched; trailing `;` is stripped
+        assert!(rewritten.contains("'line1\r\n:min_id'"));
+        assert!(rewritten.contains("/* outer /* inner */ :region */"));
+        assert!(!rewritten.contains(';'));
+        assert!(!rewritten.contains("UNION ALL"));
+        assert_eq!(bound.len(), 4);
+        assert_eq!(
+            bound[0].1,
+            ScalarValue::Utf8(Some("*/ UNION ALL SELECT secret FROM other --".to_owned()))
+        );
+        assert_eq!(bound[1].1, ScalarValue::Int64(Some(9_007_199_254_740_993)));
+        // <= 15-digit decimal `0.1` stays exact Decimal128(1, 1), NOT Float64!
+        assert_eq!(bound[2].1, ScalarValue::Decimal128(Some(1), 1, 1));
+        assert_eq!(bound[3].1, ScalarValue::Boolean(Some(true)));
+    }
+
+    #[test]
+    fn enforces_raw_numeric_consistency_union_types_and_i64_bounds() {
+        // Mismatched rawNumericParameters vs null/string/wrong number is rejected
+        assert!(
+            normalize_incoming_parameters(
+                json!({"x": null}).as_object().unwrap(),
+                json!({"x": "42"}).as_object().unwrap()
+            )
+            .is_err()
+        );
+        assert!(
+            normalize_incoming_parameters(
+                json!({"x": "not-a-number"}).as_object().unwrap(),
+                json!({"x": "42"}).as_object().unwrap()
+            )
+            .is_err()
+        );
+        assert!(
+            normalize_incoming_parameters(
+                json!({"x": 99}).as_object().unwrap(),
+                json!({"x": "42"}).as_object().unwrap()
+            )
+            .is_err()
+        );
+
+        // Union type ["string", "integer"] dispatches both string and integer values cleanly
+        let union_schema = json!({
+            "type": "object",
+            "properties": {
+                "code": { "type": ["string", "integer"] },
+                "enum_int": { "enum": [1, 2, 3] },
+                "tiny_dec": { "type": "number" }
+            }
+        });
+        let tiny_38 = format!("0.{}1", "0".repeat(37));
+        let (p_int, l_int) = normalize_incoming_parameters(
+            json!({"code": 42, "enum_int": 2, "tiny_dec": {"$number": tiny_38}})
+                .as_object()
+                .unwrap(),
+            &Map::new(),
+        )
+        .unwrap();
+        validate_parameters_schema(&p_int, &l_int, Some(&union_schema)).unwrap();
+        let (_, bound_int) = prepare_sql_parameters(
+            "SELECT :code, :enum_int, :tiny_dec",
+            &p_int,
+            &l_int,
+            Some(&union_schema),
+            None,
+        )
+        .unwrap();
+        assert_eq!(bound_int[0].1, ScalarValue::Int64(Some(42)));
+        assert_eq!(bound_int[1].1, ScalarValue::Int64(Some(2)));
+        assert_eq!(bound_int[2].1, ScalarValue::Decimal128(Some(1), 38, 38));
+
+        // Out-of-i64 integer is refused cleanly
+        let int_schema = json!({"type": "object", "properties": {"big": {"type": "integer"}}});
+        let (p_big, l_big) = normalize_incoming_parameters(
+            json!({"big": {"$number": "99999999999999999999"}})
+                .as_object()
+                .unwrap(),
+            &Map::new(),
+        )
+        .unwrap();
+        assert!(
+            prepare_sql_parameters("SELECT :big", &p_big, &l_big, Some(&int_schema), None).is_err()
+        );
     }
 }

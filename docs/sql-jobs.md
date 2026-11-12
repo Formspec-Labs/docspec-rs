@@ -161,9 +161,16 @@ Expected work is linear in endpoint bytes plus union-find operations
 
 Jobs also register `url_resolve(reference, base)`,
 `uri_normalize_encoding(value)`, `percent_decode_utf8(value)`,
+`iri_encode(value)`, `nquad_escape(value)`,
 `url_filename(value)`, `disposition_filename(value)`, `json_array(...)` and
 the maintained `datafusion-functions-json` getters. Invalid UTF-8 escapes remain
-unchanged; decoding preserves literal `+`. Download names prefer a valid
+unchanged; decoding preserves literal `+`. `iri_encode` percent-encodes every
+byte outside the RFC 3986 unreserved set (`A-Z`, `a-z`, `0-9`, `-`, `.`, `_`,
+`~`), including reserved URI delimiters and non-ASCII UTF-8 bytes, for safe IRI
+component construction. `nquad_escape` escapes W3C N-Quads string literal
+characters (`\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, and remaining ASCII
+controls `0x00`–`0x1F` and `0x7F` as `\uXXXX`) while preserving valid UTF-8.
+Both admit output buffers before allocation. Download names prefer a valid
 `filename*` over `filename`; duplicate filename parameters refuse. These
 primitives impose no host, scheme or application identity policy.
 
@@ -282,3 +289,31 @@ against the catalog, then makes one purge attempt. The REST adapter never blindl
 retries purge. After any uncertain result, the caller must reload authority and
 recheck it before another attempt. This check does not provide atomic server-side
 purge conditions: callers must exclude concurrent replacement during maintenance.
+
+## Streaming N-Quads export
+
+Run `docspec [--limits LIMITS.json] export-nquads --input INPUT.parquet --output OUTPUT.nq [--column nquad]`
+to stream a projected `Utf8`, `LargeUtf8`, `Utf8View` or dictionary-encoded string
+column into a create-only `.nq` file without materializing the dataset in memory.
+Footer metadata and decoded Arrow batches are admitted under the configured
+budget. Null rows are skipped; empty, whitespace-only or embedded-newline cells
+refuse (`invalid_export`), and existing output destinations are never overwritten
+(`existing_output`). Staging writes sync a sibling temporary file, link it into
+place with `hard_link`, and sync the parent directory before returning a compact
+single-line JSON receipt recording input and output SHA-256 digests, byte size
+and quad count (or a `{"status":"failed","error":{...}}` receipt on refusal).
+
+## Persistent catalog owner worker
+
+Run `docspec [--limits LIMITS.json] owner-worker` to serve newline-delimited JSON
+requests (`init`, `read_page`, `run_query`, `ping`) over standard input and
+output in `ddk-exact-json-v1` encoding. Startup pins `permittedRoots`, verifies
+`catalog.lock.json` against `expectedLockSha256` and its pinned `catalog.ddk.json`
+digest, checks the running `docspec` executable digest, and optionally prepares a
+permitted `retainReceiptsDir`. `read_page` verifies shard SHA-256 digests,
+homogeneous Arrow schemas and row-range contiguity while opening one shard at a
+time under footer and batch memory admission. `run_query` verifies lock-backed
+recipe SQL companions and version-pinned Parquet inputs, validates recipe JSON
+Schema parameters (preserving exact `Int64` and `Decimal128` precision without
+SQL literal interpolation), executes bounded DataFusion streams with per-query
+deadlines, and atomically publishes optional query receipts.

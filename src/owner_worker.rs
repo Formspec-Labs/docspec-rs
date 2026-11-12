@@ -5,13 +5,12 @@
 //! in-process DataFusion SQL recipe queries (`run_query`) in `ddk-exact-json-v1`
 //! format without external Python or DuckDB processes.
 
-pub mod exact;
-pub mod sql_params;
-
-pub use exact::BridgeError;
+mod exact;
+mod sql_params;
 
 use crate::budget::{Budget, Limits};
-use exact::ExactBudget;
+use arrow::datatypes::SchemaRef;
+use exact::{BridgeError, ExactBudget};
 use futures::TryStreamExt;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde_json::{Map, Value, json};
@@ -20,7 +19,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{File, Metadata, OpenOptions},
     io::{BufRead, BufReader, BufWriter, Read, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -36,7 +35,7 @@ const SQL_COMPANION_MAX_BYTES: u64 = 16 << 20;
 const DEFAULT_QUERY_TIMEOUT_SEC: f64 = 15.0;
 
 /// Default owner resource profile matching `docspec-owner-bridge.py:DEFAULT_DOCSPEC_LIMITS`.
-pub fn default_owner_limits() -> Limits {
+fn default_owner_limits() -> Limits {
     Limits {
         batch_rows: 8192,
         compute_threads: 2,
@@ -55,6 +54,8 @@ struct StatSig {
     mtime_ns: i64,
     ctime_ns: i64,
 }
+
+type FileCacheKey = (PathBuf, StatSig);
 
 fn stat_signature(meta: &Metadata) -> StatSig {
     #[cfg(unix)]
@@ -86,37 +87,53 @@ fn stat_signature(meta: &Metadata) -> StatSig {
     }
 }
 
-/// Bounded 4096-entry LRU cache mapping `(dev, ino, size, mtime_ns, ctime_ns) -> sha256`.
-#[derive(Debug, Default)]
-struct DigestCache {
+/// Bounded generic LRU cache keyed by canonical `(PathBuf, StatSig)`.
+#[derive(Debug)]
+struct LruCache<K, V> {
+    capacity: usize,
     tick: u64,
-    by_sig: BTreeMap<StatSig, (u64, String)>,
-    order: BTreeMap<u64, StatSig>,
+    by_key: BTreeMap<K, (u64, V)>,
+    order: BTreeMap<u64, K>,
 }
 
-impl DigestCache {
-    fn get(&mut self, sig: &StatSig) -> Option<&str> {
-        let (_, digest) = self.by_sig.get(sig)?;
-        let digest_cloned = digest.clone();
-        self.insert(*sig, digest_cloned);
-        self.by_sig.get(sig).map(|(_, d)| d.as_str())
+impl<K: Ord + Clone, V: Clone> LruCache<K, V> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            tick: 0,
+            by_key: BTreeMap::new(),
+            order: BTreeMap::new(),
+        }
     }
 
-    fn insert(&mut self, sig: StatSig, digest: String) {
+    fn get(&mut self, key: &K) -> Option<V> {
+        let (_, val) = self.by_key.get(key)?;
+        let cloned = val.clone();
+        self.insert(key.clone(), cloned.clone());
+        Some(cloned)
+    }
+
+    fn insert(&mut self, key: K, value: V) {
         self.tick = self.tick.saturating_add(1);
         let now = self.tick;
-        if let Some((old_tick, _)) = self.by_sig.insert(sig, (now, digest)) {
+        if let Some((old_tick, _)) = self.by_key.insert(key.clone(), (now, value)) {
             self.order.remove(&old_tick);
         }
-        self.order.insert(now, sig);
-        while self.by_sig.len() > MAX_DIGEST_CACHE {
-            let Some((&oldest_tick, &oldest_sig)) = self.order.iter().next() else {
+        self.order.insert(now, key);
+        while self.by_key.len() > self.capacity {
+            let Some((oldest_tick, oldest_key)) =
+                self.order.iter().next().map(|(t, k)| (*t, k.clone()))
+            else {
                 break;
             };
             self.order.remove(&oldest_tick);
-            self.by_sig.remove(&oldest_sig);
+            self.by_key.remove(&oldest_key);
         }
     }
+}
+
+fn is_lower_hex_64(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -254,6 +271,15 @@ fn resolve_uri_or_path(raw: &str) -> Result<PathBuf, BridgeError> {
     Ok(PathBuf::from(raw))
 }
 
+fn resolve_uri_or_path_from_dir(raw: &str, base_dir: &Path) -> Result<PathBuf, BridgeError> {
+    let candidate = resolve_uri_or_path(raw)?;
+    if candidate.is_absolute() {
+        Ok(candidate)
+    } else {
+        Ok(base_dir.join(candidate))
+    }
+}
+
 fn check_permitted_file(raw: &str, roots: &[PathBuf]) -> Result<(PathBuf, Metadata), BridgeError> {
     let candidate = resolve_uri_or_path(raw)?;
     if !candidate.is_absolute() {
@@ -294,6 +320,360 @@ fn check_permitted_file(raw: &str, roots: &[PathBuf]) -> Result<(PathBuf, Metada
     Ok((resolved, meta))
 }
 
+fn check_registration_file(
+    raw: &str,
+    field: &str,
+    roots: &[PathBuf],
+) -> Result<PathBuf, BridgeError> {
+    let candidate = Path::new(raw);
+    if !candidate.is_absolute() {
+        return Err(BridgeError::new(
+            "invalid_registration",
+            format!("{field} must be an absolute file path."),
+            400,
+        ));
+    }
+    let resolved = std::fs::canonicalize(candidate).map_err(|_| {
+        BridgeError::new(
+            "invalid_registration",
+            "Catalog and lock files must exist.",
+            400,
+        )
+    })?;
+    if !is_within_roots(&resolved, roots) {
+        return Err(BridgeError::new(
+            "evidence_refused",
+            format!("{field} is outside configured permittedRoots."),
+            409,
+        ));
+    }
+    Ok(resolved)
+}
+
+fn verify_retain_receipts_dir(raw_retain: &str, roots: &[PathBuf]) -> Result<PathBuf, BridgeError> {
+    let candidate = Path::new(raw_retain);
+    if !candidate.is_absolute() {
+        return Err(BridgeError::new(
+            "invalid_registration",
+            "retainReceiptsDir must be an absolute directory path.",
+            400,
+        ));
+    }
+    if candidate
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err(BridgeError::new(
+            "invalid_registration",
+            "retainReceiptsDir must not contain parent-directory traversal components.",
+            400,
+        ));
+    }
+    let existing_ancestor = candidate
+        .ancestors()
+        .find(|anc| anc.exists())
+        .ok_or_else(|| {
+            BridgeError::new(
+                "invalid_registration",
+                format!("retainReceiptsDir has no existing ancestor: {raw_retain:?}"),
+                400,
+            )
+        })?;
+    let canon_ancestor = std::fs::canonicalize(existing_ancestor).map_err(|err| {
+        BridgeError::new(
+            "invalid_registration",
+            format!("Unable to resolve retainReceiptsDir ancestor: {err}"),
+            400,
+        )
+    })?;
+    if !is_within_roots(&canon_ancestor, roots) {
+        return Err(BridgeError::new(
+            "evidence_refused",
+            "retainReceiptsDir is outside configured permittedRoots.",
+            409,
+        ));
+    }
+    std::fs::create_dir_all(candidate).map_err(|err| {
+        BridgeError::new(
+            "invalid_registration",
+            format!("Unable to create retainReceiptsDir {raw_retain:?}: {err}"),
+            400,
+        )
+    })?;
+    let canon = std::fs::canonicalize(candidate).map_err(|err| {
+        BridgeError::new(
+            "invalid_registration",
+            format!("Unable to resolve retainReceiptsDir {raw_retain:?}: {err}"),
+            400,
+        )
+    })?;
+    if !is_within_roots(&canon, roots) {
+        return Err(BridgeError::new(
+            "evidence_refused",
+            "retainReceiptsDir resolved outside configured permittedRoots.",
+            409,
+        ));
+    }
+    Ok(canon)
+}
+
+fn lock_output_entries(lock_doc: &Value) -> Option<&Vec<Value>> {
+    lock_doc
+        .get("extensions")
+        .and_then(Value::as_object)
+        .and_then(|ext| ext.get("urn:ddk:catalog:output-set"))
+        .and_then(Value::as_array)
+        .or_else(|| lock_doc.get("files").and_then(Value::as_array))
+}
+
+fn verify_lock_binds_catalog(
+    lock_doc: &Value,
+    lock_dir: &Path,
+    catalog_path: &Path,
+    actual_catalog_sha: &str,
+) -> Result<(), BridgeError> {
+    if lock_doc.get("kind").and_then(Value::as_str) != Some("lock") {
+        return Err(BridgeError::new(
+            "invalid_registration",
+            "catalog.lock.json kind must be \"lock\".",
+            400,
+        ));
+    }
+    let Some(entries) = lock_output_entries(lock_doc) else {
+        return Err(BridgeError::new(
+            "integrity_mismatch",
+            "catalog.lock.json does not contain a catalog output-set manifest.",
+            409,
+        ));
+    };
+    let catalog_entries: Vec<&Map<String, Value>> = entries
+        .iter()
+        .filter_map(Value::as_object)
+        .filter(|e| e.get("role").and_then(Value::as_str) == Some("catalog"))
+        .collect();
+    if catalog_entries.len() != 1 {
+        return Err(BridgeError::new(
+            "integrity_mismatch",
+            "catalog.lock.json does not uniquely pin a catalog.ddk.json digest.",
+            409,
+        ));
+    }
+    let pinned_entry = catalog_entries[0];
+    let Some(pinned_sha) = pinned_entry.get("sha256").and_then(Value::as_str) else {
+        return Err(BridgeError::new(
+            "integrity_mismatch",
+            "catalog.lock.json catalog entry is missing sha256.",
+            409,
+        ));
+    };
+    if pinned_sha != actual_catalog_sha {
+        return Err(BridgeError::new(
+            "integrity_mismatch",
+            "The catalog.ddk.json digest differs from catalog.lock.json.",
+            409,
+        ));
+    }
+    if let Some(rel_path) = pinned_entry.get("path").and_then(Value::as_str) {
+        let resolved = resolve_uri_or_path_from_dir(rel_path, lock_dir)?;
+        let canon = std::fs::canonicalize(&resolved).map_err(|_| {
+            BridgeError::new(
+                "integrity_mismatch",
+                "Pinned catalog path in catalog.lock.json does not exist.",
+                409,
+            )
+        })?;
+        if canon != catalog_path {
+            return Err(BridgeError::new(
+                "integrity_mismatch",
+                "catalogPath differs from the catalog path pinned in catalog.lock.json.",
+                409,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn lock_recipe_sha<'a>(lock_doc: &'a Value, sql_rel: &str) -> Result<&'a str, BridgeError> {
+    let Some(entries) = lock_output_entries(lock_doc) else {
+        return Err(BridgeError::new(
+            "native_scope_refused",
+            "CATALOG-RECIPE-INTEGRITY: Lock manifest has no companion inventory.",
+            409,
+        ));
+    };
+    let matches: Vec<&Map<String, Value>> = entries
+        .iter()
+        .filter_map(Value::as_object)
+        .filter(|f| {
+            f.get("role").and_then(Value::as_str) == Some("recipe")
+                && f.get("path").and_then(Value::as_str) == Some(sql_rel)
+        })
+        .collect();
+    if matches.len() != 1 {
+        return Err(BridgeError::new(
+            "native_scope_refused",
+            "CATALOG-RECIPE-INTEGRITY: The SQL has no unique lock companion entry.",
+            409,
+        ));
+    }
+    matches[0]
+        .get("sha256")
+        .and_then(Value::as_str)
+        .filter(|s| is_lower_hex_64(s))
+        .ok_or_else(|| {
+            BridgeError::new(
+                "integrity_mismatch",
+                "Lock companion SQL entry has an invalid SHA-256 digest.",
+                409,
+            )
+        })
+}
+
+fn verify_version_file_binding(
+    ver_doc: &Map<String, Value>,
+    catalog_doc: &Value,
+    lock_doc: &Value,
+    catalog_dir: &Path,
+    file_path: &Path,
+    expected_sha: &str,
+) -> Result<(), BridgeError> {
+    if let Some(ref_obj) = ver_doc.get("reference").and_then(Value::as_object)
+        && ref_obj.get("scheme").and_then(Value::as_str)
+            == Some("urn:ddk:version:local-file-sha256")
+    {
+        let val_obj = ref_obj
+            .get("value")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                BridgeError::new(
+                    "binding_mismatch",
+                    "Version local-file-sha256 reference is missing value object.",
+                    409,
+                )
+            })?;
+        let raw_loc = val_obj
+            .get("location")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                BridgeError::new(
+                    "binding_mismatch",
+                    "Version local-file-sha256 reference is missing location.",
+                    409,
+                )
+            })?;
+        let pinned_sha = val_obj
+            .get("sha256")
+            .and_then(Value::as_str)
+            .filter(|s| is_lower_hex_64(s))
+            .ok_or_else(|| {
+                BridgeError::new(
+                    "binding_mismatch",
+                    "Version local-file-sha256 reference is missing valid sha256.",
+                    409,
+                )
+            })?;
+        let candidate = resolve_uri_or_path_from_dir(raw_loc, catalog_dir)?;
+        let pinned_path = std::fs::canonicalize(&candidate).map_err(|_| {
+            BridgeError::new(
+                "binding_mismatch",
+                "Pinned version reference file does not exist.",
+                409,
+            )
+        })?;
+        if pinned_path != file_path {
+            return Err(BridgeError::new(
+                "binding_mismatch",
+                "Input file path disagrees with catalog version reference.",
+                409,
+            ));
+        }
+        if pinned_sha != expected_sha {
+            return Err(BridgeError::new(
+                "integrity_mismatch",
+                "Input SHA-256 disagrees with catalog version reference.",
+                409,
+            ));
+        }
+        return Ok(());
+    }
+
+    let ver_id = ver_doc.get("id").and_then(Value::as_str).unwrap_or("");
+    let rep_ids: BTreeSet<&str> = catalog_doc
+        .get("representations")
+        .and_then(Value::as_array)
+        .map(|reps| {
+            reps.iter()
+                .filter_map(Value::as_object)
+                .filter(|r| r.get("version").and_then(Value::as_str) == Some(ver_id))
+                .filter_map(|r| r.get("id").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut matched_path = false;
+    if let Some(lock_files) = lock_doc.get("files").and_then(Value::as_array) {
+        for entry in lock_files.iter().filter_map(Value::as_object) {
+            if entry.get("role").and_then(Value::as_str) != Some("data") {
+                continue;
+            }
+            let Some(ident) = entry.get("identity").and_then(Value::as_str) else {
+                continue;
+            };
+            if ident != ver_id && !rep_ids.contains(ident) {
+                continue;
+            }
+            let Some(raw_loc) = entry.get("path").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(pinned_sha) = entry
+                .get("sha256")
+                .and_then(Value::as_str)
+                .filter(|s| is_lower_hex_64(s))
+            else {
+                continue;
+            };
+            if let Ok(candidate) = resolve_uri_or_path_from_dir(raw_loc, catalog_dir)
+                && let Ok(pinned_path) = std::fs::canonicalize(&candidate)
+                && pinned_path == file_path
+            {
+                matched_path = true;
+                if pinned_sha == expected_sha {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    if matched_path {
+        Err(BridgeError::new(
+            "integrity_mismatch",
+            "Input SHA-256 disagrees with lock data entry.",
+            409,
+        ))
+    } else {
+        Err(BridgeError::new(
+            "binding_mismatch",
+            "Input file is not pinned by the bound catalog version or lock.",
+            409,
+        ))
+    }
+}
+
+fn schemas_match_across_shards(first: &SchemaRef, candidate: &SchemaRef) -> bool {
+    if first.fields().len() != candidate.fields().len() {
+        return false;
+    }
+    first
+        .fields()
+        .iter()
+        .zip(candidate.fields().iter())
+        .all(|(a, b)| {
+            a.name() == b.name()
+                && a.data_type() == b.data_type()
+                && a.is_nullable() == b.is_nullable()
+        })
+}
+
 struct ScratchDirGuard {
     path: PathBuf,
 }
@@ -301,6 +681,29 @@ struct ScratchDirGuard {
 impl Drop for ScratchDirGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+struct TempReceiptGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempReceiptGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempReceiptGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -377,13 +780,21 @@ fn map_job_error(err: crate::Error) -> BridgeError {
         "capacity" | "metadata_capacity" | "disk_capacity" | "request_timeout"
     ) || err.message().contains("Resources exhausted")
     {
-        return BridgeError::new("native_read_unknown", err.to_string(), 408);
+        return BridgeError::new("native_read_unknown", format!("{}: {err}", err.code()), 408);
     }
-    BridgeError::new("native_read_refused", err.to_string(), 409)
+    BridgeError::new("native_read_refused", format!("{}: {err}", err.code()), 409)
+}
+
+struct VerifiedShard {
+    path: PathBuf,
+    sig: StatSig,
+    start: usize,
+    end: usize,
 }
 
 /// Stateful per-process owner worker handling `init`, `read_page`, `run_query`, and `ping`.
-pub struct OwnerWorker {
+struct OwnerWorker {
+    runtime: tokio::runtime::Handle,
     initialized: bool,
     base_limits: Limits,
     limits: Limits,
@@ -395,27 +806,29 @@ pub struct OwnerWorker {
     catalog_doc: Option<Value>,
     lock_path: Option<PathBuf>,
     lock_sha256: Option<String>,
+    lock_doc: Option<Value>,
     permitted_roots: Vec<PathBuf>,
     retain_receipts_dir: Option<PathBuf>,
-    worker_temp_dir: PathBuf,
-    digest_cache: DigestCache,
-    sql_cache: BTreeMap<StatSig, Arc<str>>,
+    worker_temp_dir: Option<PathBuf>,
+    digest_cache: LruCache<FileCacheKey, String>,
+    sql_cache: LruCache<FileCacheKey, Arc<str>>,
     next_query_seq: u64,
     next_receipt_seq: u64,
 }
 
 impl Drop for OwnerWorker {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.worker_temp_dir);
+        if let Some(dir) = &self.worker_temp_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 
 impl OwnerWorker {
-    /// Creates an uninitialized worker with optional CLI `--limits` overrides.
-    pub fn new(cli_limits: Option<Limits>) -> Result<Self, std::io::Error> {
+    fn new(cli_limits: Option<Limits>, runtime: tokio::runtime::Handle) -> Self {
         let base_limits = cli_limits.unwrap_or_else(default_owner_limits);
-        let worker_temp_dir = create_worker_temp_dir()?;
-        Ok(Self {
+        Self {
+            runtime,
             initialized: false,
             limits: base_limits.clone(),
             base_limits,
@@ -427,14 +840,30 @@ impl OwnerWorker {
             catalog_doc: None,
             lock_path: None,
             lock_sha256: None,
+            lock_doc: None,
             permitted_roots: Vec::new(),
             retain_receipts_dir: None,
-            worker_temp_dir,
-            digest_cache: DigestCache::default(),
-            sql_cache: BTreeMap::new(),
+            worker_temp_dir: None,
+            digest_cache: LruCache::new(MAX_DIGEST_CACHE),
+            sql_cache: LruCache::new(MAX_SQL_CACHE),
             next_query_seq: 0,
             next_receipt_seq: 0,
-        })
+        }
+    }
+
+    fn ensure_worker_temp_dir(&mut self) -> Result<PathBuf, BridgeError> {
+        if let Some(existing) = &self.worker_temp_dir {
+            return Ok(existing.clone());
+        }
+        let created = create_worker_temp_dir().map_err(|err| {
+            BridgeError::new(
+                "owner_unavailable",
+                format!("Unable to create owner worker scratch root: {err}"),
+                503,
+            )
+        })?;
+        self.worker_temp_dir = Some(created.clone());
+        Ok(created)
     }
 
     fn verify_cached_digest(
@@ -446,7 +875,8 @@ impl OwnerWorker {
         mismatch_message: &'static str,
     ) -> Result<StatSig, BridgeError> {
         let sig = stat_signature(meta);
-        if let Some(cached) = self.digest_cache.get(&sig) {
+        let cache_key = (path.to_path_buf(), sig);
+        if let Some(cached) = self.digest_cache.get(&cache_key) {
             if cached != expected_sha256 {
                 return Err(BridgeError::new(
                     "integrity_mismatch",
@@ -464,7 +894,7 @@ impl OwnerWorker {
             ));
         }
         let actual = sha256_file(path)?;
-        self.digest_cache.insert(sig, actual.clone());
+        self.digest_cache.insert(cache_key, actual.clone());
         if actual != expected_sha256 {
             return Err(BridgeError::new(
                 "integrity_mismatch",
@@ -494,24 +924,32 @@ impl OwnerWorker {
                 409,
             ));
         }
-        let sig = self.verify_cached_digest(
-            sql_path,
-            &meta,
-            expected_sha256,
-            SQL_COMPANION_MAX_BYTES,
-            "Recipe SQL companion digest mismatch.",
-        )?;
-        if let Some(cached_sql) = self.sql_cache.get(&sig) {
-            return Ok(Arc::clone(cached_sql));
+        let cache_key = (sql_path.to_path_buf(), stat_signature(&meta));
+        if let Some(cached_digest) = self.digest_cache.get(&cache_key) {
+            if cached_digest != expected_sha256 {
+                return Err(BridgeError::new(
+                    "integrity_mismatch",
+                    "Recipe SQL companion digest mismatch.",
+                    409,
+                ));
+            }
+            if let Some(cached_sql) = self.sql_cache.get(&cache_key) {
+                return Ok(cached_sql);
+            }
         }
-        let (_, bytes) = read_bounded_file(
+
+        let (read_meta, bytes) = read_bounded_file(
             sql_path,
             SQL_COMPANION_MAX_BYTES,
             "integrity_mismatch",
             409,
             "adapter_budget",
         )?;
-        if sha256_bytes(&bytes) != expected_sha256 {
+        let read_key = (sql_path.to_path_buf(), stat_signature(&read_meta));
+        let actual_sha = sha256_bytes(&bytes);
+        self.digest_cache
+            .insert(read_key.clone(), actual_sha.clone());
+        if actual_sha != expected_sha256 {
             return Err(BridgeError::new(
                 "integrity_mismatch",
                 "Recipe SQL companion digest mismatch.",
@@ -526,15 +964,11 @@ impl OwnerWorker {
             )
         })?;
         let arc_sql: Arc<str> = Arc::from(sql_str);
-        if self.sql_cache.len() >= MAX_SQL_CACHE {
-            self.sql_cache.clear();
-        }
-        self.sql_cache.insert(sig, Arc::clone(&arc_sql));
+        self.sql_cache.insert(read_key, Arc::clone(&arc_sql));
         Ok(arc_sql)
     }
 
-    /// Handles `init(params)`.
-    pub fn init(&mut self, params: &Map<String, Value>) -> Result<Value, BridgeError> {
+    fn init(&mut self, params: &Map<String, Value>) -> Result<Value, BridgeError> {
         if self.initialized {
             return Err(BridgeError::new(
                 "invalid_registration",
@@ -601,30 +1035,31 @@ impl OwnerWorker {
         let catalog_raw = params
             .get("catalogPath")
             .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| {
                 BridgeError::new("invalid_registration", "catalogPath is required.", 400)
             })?;
         let lock_raw = params
             .get("lockPath")
             .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| {
                 BridgeError::new("invalid_registration", "lockPath is required.", 400)
             })?;
+        let expected_lock_sha = params
+            .get("expectedLockSha256")
+            .and_then(Value::as_str)
+            .filter(|s| is_lower_hex_64(s))
+            .ok_or_else(|| {
+                BridgeError::new(
+                    "invalid_registration",
+                    "expectedLockSha256 must be a 64-character lowercase hex SHA-256 digest.",
+                    400,
+                )
+            })?;
 
-        let catalog_path = std::fs::canonicalize(catalog_raw).map_err(|_| {
-            BridgeError::new(
-                "invalid_registration",
-                "Catalog and lock files must exist.",
-                400,
-            )
-        })?;
-        let lock_path = std::fs::canonicalize(lock_raw).map_err(|_| {
-            BridgeError::new(
-                "invalid_registration",
-                "Catalog and lock files must exist.",
-                400,
-            )
-        })?;
+        let catalog_path = check_registration_file(catalog_raw, "catalogPath", &resolved_roots)?;
+        let lock_path = check_registration_file(lock_raw, "lockPath", &resolved_roots)?;
 
         let (lock_meta, lock_bytes) = read_bounded_file(
             &lock_path,
@@ -634,12 +1069,7 @@ impl OwnerWorker {
             "adapter_budget",
         )?;
         let actual_lock_sha = sha256_bytes(&lock_bytes);
-        if let Some(expected_lock_sha) = params
-            .get("expectedLockSha256")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            && actual_lock_sha != expected_lock_sha
-        {
+        if actual_lock_sha != expected_lock_sha {
             return Err(BridgeError::new(
                 "integrity_mismatch",
                 "The catalog.lock.json digest differs from lockSha256.",
@@ -656,20 +1086,6 @@ impl OwnerWorker {
         )?;
         let actual_catalog_sha = sha256_bytes(&catalog_bytes);
 
-        let catalog_doc: Value = serde_json::from_slice(&catalog_bytes).map_err(|err| {
-            BridgeError::new(
-                "invalid_registration",
-                format!("Invalid catalog.ddk.json JSON: {err}"),
-                400,
-            )
-        })?;
-        if !catalog_doc.is_object() {
-            return Err(BridgeError::new(
-                "invalid_registration",
-                "catalog.ddk.json root must be a JSON object.",
-                400,
-            ));
-        }
         let lock_doc: Value = serde_json::from_slice(&lock_bytes).map_err(|err| {
             BridgeError::new(
                 "invalid_registration",
@@ -684,6 +1100,29 @@ impl OwnerWorker {
                 400,
             ));
         }
+        let catalog_doc: Value = serde_json::from_slice(&catalog_bytes).map_err(|err| {
+            BridgeError::new(
+                "invalid_registration",
+                format!("Invalid catalog.ddk.json JSON: {err}"),
+                400,
+            )
+        })?;
+        if !catalog_doc.is_object() {
+            return Err(BridgeError::new(
+                "invalid_registration",
+                "catalog.ddk.json root must be a JSON object.",
+                400,
+            ));
+        }
+
+        let lock_dir = lock_path.parent().map(Path::to_path_buf).ok_or_else(|| {
+            BridgeError::new(
+                "invalid_registration",
+                "lockPath must have a parent directory.",
+                400,
+            )
+        })?;
+        verify_lock_binds_catalog(&lock_doc, &lock_dir, &catalog_path, &actual_catalog_sha)?;
 
         let catalog_dir = catalog_path
             .parent()
@@ -696,18 +1135,28 @@ impl OwnerWorker {
                 )
             })?;
 
-        self.digest_cache
-            .insert(stat_signature(&lock_meta), actual_lock_sha.clone());
-        self.digest_cache
-            .insert(stat_signature(&catalog_meta), actual_catalog_sha.clone());
+        self.digest_cache.insert(
+            (lock_path.clone(), stat_signature(&lock_meta)),
+            actual_lock_sha.clone(),
+        );
+        self.digest_cache.insert(
+            (catalog_path.clone(), stat_signature(&catalog_meta)),
+            actual_catalog_sha.clone(),
+        );
 
-        // Seed companion SQL digests and text cache on startup
+        // Seed companion SQL digests and text cache only for lock-verified recipe entries
         if let Some(files) = catalog_doc.get("files").and_then(Value::as_array) {
             for entry in files {
                 if entry.get("role").and_then(Value::as_str) == Some("recipe")
                     && let Some(rel) = entry.get("path").and_then(Value::as_str)
+                    && let Some(cat_sha) = entry
+                        .get("sha256")
+                        .and_then(Value::as_str)
+                        .filter(|s| is_lower_hex_64(s))
+                    && lock_recipe_sha(&lock_doc, rel).ok() == Some(cat_sha)
                     && let Ok(comp_path) = std::fs::canonicalize(catalog_dir.join(rel))
                     && comp_path.starts_with(&catalog_dir)
+                    && is_within_roots(&comp_path, &resolved_roots)
                     && let Ok((comp_meta, comp_bytes)) = read_bounded_file(
                         &comp_path,
                         SQL_COMPANION_MAX_BYTES,
@@ -717,19 +1166,29 @@ impl OwnerWorker {
                     )
                 {
                     let comp_sha = sha256_bytes(&comp_bytes);
-                    let comp_sig = stat_signature(&comp_meta);
-                    self.digest_cache.insert(comp_sig, comp_sha);
-                    if let Ok(comp_str) = String::from_utf8(comp_bytes)
-                        && self.sql_cache.len() < MAX_SQL_CACHE
-                    {
-                        self.sql_cache.insert(comp_sig, Arc::from(comp_str));
+                    if comp_sha == cat_sha {
+                        let comp_key = (comp_path, stat_signature(&comp_meta));
+                        self.digest_cache.insert(comp_key.clone(), comp_sha);
+                        if let Ok(comp_str) = String::from_utf8(comp_bytes) {
+                            self.sql_cache.insert(comp_key, Arc::from(comp_str));
+                        }
                     }
                 }
             }
         }
 
-        // Verify own or explicitly supplied DocSpec binary SHA-256 once at startup
-        let bin_path = if let Some(raw_bin) = params
+        // Verify current running DocSpec executable (refusing non-self docspecBinary paths)
+        let current_exe = std::env::current_exe()
+            .and_then(std::fs::canonicalize)
+            .map_err(|err| {
+                BridgeError::new(
+                    "owner_unavailable",
+                    format!("Unable to resolve current docspec executable: {err}"),
+                    503,
+                )
+            })?;
+
+        if let Some(raw_bin) = params
             .get("docspecBinary")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
@@ -766,31 +1225,34 @@ impl OwnerWorker {
                     503,
                 ));
             }
-            resolved
-        } else {
-            std::env::current_exe()
-                .and_then(std::fs::canonicalize)
-                .map_err(|err| {
-                    BridgeError::new(
-                        "owner_unavailable",
-                        format!("Unable to resolve current docspec executable: {err}"),
-                        503,
-                    )
-                })?
-        };
+            if resolved != current_exe {
+                return Err(BridgeError::new(
+                    "evidence_refused",
+                    "docspecBinary must identify the active docspec owner-worker executable.",
+                    409,
+                ));
+            }
+        }
 
-        let actual_bin_sha = sha256_file(&bin_path)?;
-        if let Some(expected_bin_sha) = params
-            .get("docspecSha256")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            && actual_bin_sha != expected_bin_sha
-        {
-            return Err(BridgeError::new(
-                "integrity_mismatch",
-                "The selected DocSpec binary SHA-256 differs from docspecSha256.",
-                409,
-            ));
+        let actual_bin_sha = sha256_file(&current_exe)?;
+        if let Some(expected_bin_val) = params.get("docspecSha256").filter(|v| !v.is_null()) {
+            let expected_bin_sha = expected_bin_val.as_str().unwrap_or("");
+            if !expected_bin_sha.is_empty() {
+                if !is_lower_hex_64(expected_bin_sha) {
+                    return Err(BridgeError::new(
+                        "invalid_registration",
+                        "docspecSha256 must be a 64-character lowercase hex SHA-256 digest.",
+                        400,
+                    ));
+                }
+                if actual_bin_sha != expected_bin_sha {
+                    return Err(BridgeError::new(
+                        "integrity_mismatch",
+                        "The selected DocSpec binary SHA-256 differs from docspecSha256.",
+                        409,
+                    ));
+                }
+            }
         }
 
         let merged_limits =
@@ -833,21 +1295,7 @@ impl OwnerWorker {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
         {
-            std::fs::create_dir_all(raw_retain).map_err(|err| {
-                BridgeError::new(
-                    "invalid_registration",
-                    format!("Unable to create retainReceiptsDir {raw_retain:?}: {err}"),
-                    400,
-                )
-            })?;
-            let canon = std::fs::canonicalize(raw_retain).map_err(|err| {
-                BridgeError::new(
-                    "invalid_registration",
-                    format!("Unable to resolve retainReceiptsDir {raw_retain:?}: {err}"),
-                    400,
-                )
-            })?;
-            Some(canon)
+            Some(verify_retain_receipts_dir(raw_retain, &resolved_roots)?)
         } else {
             None
         };
@@ -865,6 +1313,7 @@ impl OwnerWorker {
         self.catalog_doc = Some(catalog_doc);
         self.lock_path = Some(lock_path);
         self.lock_sha256 = Some(actual_lock_sha.clone());
+        self.lock_doc = Some(lock_doc);
         self.limits = merged_limits;
         self.query_timeout = Duration::from_secs_f64(timeout_sec);
         self.retain_receipts_dir = retain_receipts_dir;
@@ -878,8 +1327,7 @@ impl OwnerWorker {
         }))
     }
 
-    /// Handles `read_page(params)` purely via Rust Arrow/Parquet row-group pruning and slicing.
-    pub fn read_page(&mut self, params: &Map<String, Value>) -> Result<Value, BridgeError> {
+    fn read_page(&mut self, params: &Map<String, Value>) -> Result<Value, BridgeError> {
         if !self.initialized {
             return Err(BridgeError::new(
                 "owner_unavailable",
@@ -945,9 +1393,14 @@ impl OwnerWorker {
             })?,
         };
 
+        let budget = Budget::new(self.limits.clone()).map_err(map_job_error)?;
+        let exact_max_bytes = self.limits.max_batch_bytes.min(exact::MAX_EXACT_PAGE_BYTES);
+        let _page_permit = budget.reserve(exact_max_bytes).map_err(map_job_error)?;
+
         let roots = self.permitted_roots.clone();
-        let mut opened: Vec<(ParquetRecordBatchReaderBuilder<File>, usize)> =
-            Vec::with_capacity(shards.len());
+        let runtime = self.runtime.clone();
+        let mut verified_shards: Vec<VerifiedShard> = Vec::with_capacity(shards.len());
+        let mut first_schema: Option<SchemaRef> = None;
         let mut expected_cursor = 0usize;
 
         for shard_val in shards {
@@ -962,6 +1415,17 @@ impl OwnerWorker {
                 .get("path")
                 .and_then(Value::as_str)
                 .ok_or_else(|| BridgeError::new("page_budget", "Shard path is required.", 400))?;
+            let expected_sha = shard
+                .get("sha256")
+                .and_then(Value::as_str)
+                .filter(|s| is_lower_hex_64(s))
+                .ok_or_else(|| {
+                    BridgeError::new(
+                        "integrity_mismatch",
+                        "Parquet shard requires a 64-character lowercase hex sha256 digest.",
+                        409,
+                    )
+                })?;
 
             let (resolved, meta) = check_permitted_file(raw_path, &roots)?;
 
@@ -982,20 +1446,17 @@ impl OwnerWorker {
                 }
             }
 
-            if let Some(expected_sha) = shard
-                .get("sha256")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-            {
-                self.verify_cached_digest(
-                    &resolved,
-                    &meta,
-                    expected_sha,
-                    verify_max,
-                    "Parquet file bytes differ from catalog SHA-256.",
-                )?;
-            }
+            let sig = self.verify_cached_digest(
+                &resolved,
+                &meta,
+                expected_sha,
+                verify_max,
+                "Parquet file bytes differ from catalog SHA-256.",
+            )?;
 
+            let footer_permit = runtime
+                .block_on(crate::storage::admit_parquet_footer(&resolved, &budget))
+                .map_err(map_job_error)?;
             let file = File::open(&resolved).map_err(|err| {
                 BridgeError::new(
                     "evidence_refused",
@@ -1003,6 +1464,20 @@ impl OwnerWorker {
                     404,
                 )
             })?;
+            let open_meta = file.metadata().map_err(|err| {
+                BridgeError::new(
+                    "owner_unavailable",
+                    format!("Unable to stat opened Parquet shard: {err}"),
+                    503,
+                )
+            })?;
+            if stat_signature(&open_meta) != sig {
+                return Err(BridgeError::new(
+                    "integrity_mismatch",
+                    "Parquet shard changed on disk during verification.",
+                    409,
+                ));
+            }
             let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|err| {
                 BridgeError::new(
                     "owner_schema_mismatch",
@@ -1019,6 +1494,21 @@ impl OwnerWorker {
                     422,
                 )
             })?;
+            let shard_schema = builder.schema().clone();
+            drop(builder);
+            drop(footer_permit);
+
+            if let Some(ref base_schema) = first_schema {
+                if !schemas_match_across_shards(base_schema, &shard_schema) {
+                    return Err(BridgeError::new(
+                        "owner_schema_mismatch",
+                        "Parquet shard schema disagrees with initial shard schema.",
+                        422,
+                    ));
+                }
+            } else {
+                first_schema = Some(shard_schema);
+            }
 
             if let Some(row_count_val) = shard.get("rowCount").filter(|v| !v.is_null()) {
                 let expected_rows = row_count_val
@@ -1080,14 +1570,25 @@ impl OwnerWorker {
                 }
             }
 
+            let shard_start = expected_cursor;
             expected_cursor = expected_cursor.saturating_add(num_rows);
-            opened.push((builder, num_rows));
+            verified_shards.push(VerifiedShard {
+                path: resolved,
+                sig,
+                start: shard_start,
+                end: expected_cursor,
+            });
         }
 
         let total = expected_cursor;
-        let schema_summary: Vec<Value> = opened[0]
-            .0
-            .schema()
+        let schema_ref = first_schema.ok_or_else(|| {
+            BridgeError::new(
+                "page_budget",
+                "At least one Parquet shard is required.",
+                400,
+            )
+        })?;
+        let schema_summary: Vec<Value> = schema_ref
             .fields()
             .iter()
             .map(|field| {
@@ -1112,21 +1613,50 @@ impl OwnerWorker {
 
         let target_start = offset;
         let target_end = offset.saturating_add(limit).min(total);
-        let batch_size = (limit * 2).clamp(128, 2048);
+        let max_reader_rows = self.limits.batch_rows.clamp(1, 2048);
+        let batch_size = (limit * 2).clamp(1, max_reader_rows);
         let mut rows: Vec<Value> = Vec::with_capacity(target_end - target_start);
         let mut row_positions: Vec<usize> = Vec::with_capacity(target_end - target_start);
-        let mut exact_budget = ExactBudget::default();
-        let mut global_cursor = 0usize;
+        let mut exact_budget = ExactBudget::with_max_bytes(exact_max_bytes);
 
-        for (builder, shard_rows) in opened {
-            let shard_start = global_cursor;
-            let shard_end = shard_start + shard_rows;
-            global_cursor = shard_end;
-            if shard_end <= target_start || shard_start >= target_end {
+        for shard in verified_shards {
+            if shard.end <= target_start || shard.start >= target_end {
                 continue;
             }
 
-            let mut rg_cursor = shard_start;
+            let _footer_permit = runtime
+                .block_on(crate::storage::admit_parquet_footer(&shard.path, &budget))
+                .map_err(map_job_error)?;
+            let file = File::open(&shard.path).map_err(|err| {
+                BridgeError::new(
+                    "evidence_refused",
+                    format!("Permitted file is unavailable: {err}"),
+                    404,
+                )
+            })?;
+            let open_meta = file.metadata().map_err(|err| {
+                BridgeError::new(
+                    "owner_unavailable",
+                    format!("Unable to stat opened Parquet shard: {err}"),
+                    503,
+                )
+            })?;
+            if stat_signature(&open_meta) != shard.sig {
+                return Err(BridgeError::new(
+                    "integrity_mismatch",
+                    "Parquet shard changed on disk before page decode.",
+                    409,
+                ));
+            }
+            let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|err| {
+                BridgeError::new(
+                    "owner_schema_mismatch",
+                    format!("Unable to open Parquet metadata: {err}"),
+                    422,
+                )
+            })?;
+
+            let mut rg_cursor = shard.start;
             let mut selected_rgs = Vec::new();
             let mut selected_rg_start = None;
             for (rg_idx, rg_meta) in builder.metadata().row_groups().iter().enumerate() {
@@ -1172,6 +1702,18 @@ impl OwnerWorker {
                         422,
                     )
                 })?;
+                let batch_bytes = batch.get_array_memory_size();
+                if batch_bytes > self.limits.max_batch_bytes {
+                    return Err(map_job_error(crate::Error::refusal(
+                        "capacity",
+                        format!(
+                            "Decoded Parquet batch ({batch_bytes} bytes) exceeds max_batch_bytes ({})",
+                            self.limits.max_batch_bytes
+                        ),
+                    )));
+                }
+                let _batch_permit = budget.reserve(batch_bytes).map_err(map_job_error)?;
+
                 let b_len = batch.num_rows();
                 let b_start = batch_cursor;
                 let b_end = b_start + b_len;
@@ -1209,8 +1751,7 @@ impl OwnerWorker {
         }))
     }
 
-    /// Handles `run_query(params)` completely in-process via `docspec::job::Job` + DataFusion.
-    pub async fn run_query(&mut self, params: &Map<String, Value>) -> Result<Value, BridgeError> {
+    fn run_query(&mut self, params: &Map<String, Value>) -> Result<Value, BridgeError> {
         if !self.initialized {
             return Err(BridgeError::new(
                 "owner_unavailable",
@@ -1222,13 +1763,22 @@ impl OwnerWorker {
         let recipe_id = params
             .get("recipeId")
             .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| BridgeError::new("invalid_request", "recipeId is required.", 400))?;
         let expected_sql_sha = params
             .get("expectedSqlSha256")
             .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| {
                 BridgeError::new("invalid_request", "expectedSqlSha256 is required.", 400)
             })?;
+        if !is_lower_hex_64(expected_sql_sha) {
+            return Err(BridgeError::new(
+                "integrity_mismatch",
+                "expectedSqlSha256 must be a 64-character lowercase hex digest.",
+                409,
+            ));
+        }
         let limit_u64 = params.get("limit").and_then(Value::as_u64).ok_or_else(|| {
             BridgeError::new("page_budget", "limit must be a positive integer.", 400)
         })?;
@@ -1243,7 +1793,9 @@ impl OwnerWorker {
             .map_err(|_| BridgeError::new("page_budget", "limit overflows usize.", 400))?;
         let wrap_limit = match params.get("wrapLimit") {
             None | Some(Value::Null) => true,
-            Some(v) => v.as_bool().unwrap_or(true),
+            Some(v) => v.as_bool().ok_or_else(|| {
+                BridgeError::new("invalid_request", "wrapLimit must be a boolean.", 400)
+            })?,
         };
         let release_id = params
             .get("releaseId")
@@ -1341,6 +1893,9 @@ impl OwnerWorker {
         let catalog_doc = self.catalog_doc.clone().ok_or_else(|| {
             BridgeError::new("owner_unavailable", "Catalog document unavailable.", 503)
         })?;
+        let lock_doc = self.lock_doc.clone().ok_or_else(|| {
+            BridgeError::new("owner_unavailable", "Lock document unavailable.", 503)
+        })?;
 
         let recipe_doc = catalog_doc
             .get("recipes")
@@ -1369,7 +1924,7 @@ impl OwnerWorker {
                 )
             })?;
 
-        // Check unique companion entry in catalog.files
+        // Check unique companion entry in BOTH catalog.files AND catalog.lock.json
         let matching_files: Vec<&Map<String, Value>> = catalog_doc
             .get("files")
             .and_then(Value::as_array)
@@ -1395,7 +1950,8 @@ impl OwnerWorker {
             .get("sha256")
             .and_then(Value::as_str)
             .unwrap_or("");
-        if catalog_sql_sha != expected_sql_sha {
+        let locked_sql_sha = lock_recipe_sha(&lock_doc, sql_rel)?;
+        if catalog_sql_sha != expected_sql_sha || locked_sql_sha != expected_sql_sha {
             return Err(BridgeError::new(
                 "integrity_mismatch",
                 "Recipe SQL companion digest mismatch.",
@@ -1403,6 +1959,7 @@ impl OwnerWorker {
             ));
         }
 
+        let roots = self.permitted_roots.clone();
         let sql_file = std::fs::canonicalize(catalog_dir.join(sql_rel)).map_err(|_| {
             BridgeError::new(
                 "integrity_mismatch",
@@ -1410,10 +1967,10 @@ impl OwnerWorker {
                 409,
             )
         })?;
-        if !sql_file.starts_with(&catalog_dir) {
+        if !sql_file.starts_with(&catalog_dir) || !is_within_roots(&sql_file, &roots) {
             return Err(BridgeError::new(
                 "evidence_refused",
-                "Recipe SQL companion escapes catalog directory.",
+                "Recipe SQL companion escapes catalog directory or permittedRoots.",
                 409,
             ));
         }
@@ -1664,10 +2221,7 @@ impl OwnerWorker {
         for ver_doc in bound_versions.values() {
             let withheld_flag =
                 ver_doc.get("referenceDisclosure").and_then(Value::as_str) == Some("withheld");
-            let missing_ref = match ver_doc.get("reference") {
-                None | Some(Value::Null) => true,
-                Some(_) => false,
-            };
+            let missing_ref = matches!(ver_doc.get("reference"), None | Some(Value::Null));
             if withheld_flag || missing_ref {
                 return Err(BridgeError::new(
                     "native_scope_refused",
@@ -1677,7 +2231,7 @@ impl OwnerWorker {
             }
         }
 
-        // Verify bound_versions match input_specs keys and versionIds
+        // Verify bound_versions match input_specs keys, versionIds, and pinned paths/hashes
         let bound_keys: BTreeSet<&str> = bound_versions.keys().map(String::as_str).collect();
         let spec_keys: BTreeSet<&str> = input_specs.keys().map(String::as_str).collect();
         if bound_keys != spec_keys {
@@ -1688,7 +2242,6 @@ impl OwnerWorker {
             ));
         }
 
-        let roots = self.permitted_roots.clone();
         let mut verified_inputs: Vec<(String, PathBuf)> = Vec::with_capacity(bound_versions.len());
         let mut receipt_inputs: Vec<Value> = Vec::with_capacity(bound_versions.len());
 
@@ -1719,20 +2272,36 @@ impl OwnerWorker {
                     409,
                 )
             })?;
-            let (file_path, meta) = check_permitted_file(raw_path, &roots)?;
-            let maybe_sha = spec
+            let expected_sha = spec
                 .get("sha256")
                 .and_then(Value::as_str)
-                .filter(|s| !s.is_empty());
-            if let Some(expected_sha) = maybe_sha {
-                self.verify_cached_digest(
-                    &file_path,
-                    &meta,
-                    expected_sha,
-                    verify_max,
-                    "Parquet file bytes differ from catalog SHA-256.",
-                )?;
-            }
+                .filter(|s| is_lower_hex_64(s))
+                .ok_or_else(|| {
+                    BridgeError::new(
+                        "integrity_mismatch",
+                        format!(
+                            "Input {input_name:?} requires a 64-character lowercase hex sha256 digest."
+                        ),
+                        409,
+                    )
+                })?;
+
+            let (file_path, meta) = check_permitted_file(raw_path, &roots)?;
+            verify_version_file_binding(
+                ver_doc,
+                &catalog_doc,
+                &lock_doc,
+                &catalog_dir,
+                &file_path,
+                expected_sha,
+            )?;
+            self.verify_cached_digest(
+                &file_path,
+                &meta,
+                expected_sha,
+                verify_max,
+                "Parquet file bytes differ from catalog SHA-256.",
+            )?;
 
             let mut entry = Map::new();
             entry.insert("name".to_owned(), Value::String(input_name.clone()));
@@ -1743,14 +2312,12 @@ impl OwnerWorker {
                 "path".to_owned(),
                 Value::String(file_path.to_string_lossy().into_owned()),
             );
-            if let Some(sha) = maybe_sha {
-                entry.insert("sha256".to_owned(), Value::String(sha.to_owned()));
-            }
+            entry.insert("sha256".to_owned(), Value::String(expected_sha.to_owned()));
             receipt_inputs.push(Value::Object(entry));
             verified_inputs.push((input_name.clone(), file_path));
         }
 
-        // Bind SQL parameters and wrap limit
+        // Tokenize and bind SQL parameters natively (zero literal interpolation)
         let parameter_order: Option<Vec<String>> = match recipe_doc.get("parameterOrder") {
             None | Some(Value::Null) => None,
             Some(Value::Array(arr)) => {
@@ -1776,28 +2343,19 @@ impl OwnerWorker {
             }
         };
 
-        let bound_sql = sql_params::bind_sql_parameters(
+        let (bound_sql, bound_values) = sql_params::prepare_sql_parameters(
             &raw_sql,
             &norm_params,
             &norm_lexemes,
             recipe_doc.get("parameters"),
             parameter_order.as_deref(),
         )?;
-        let exec_sql = if wrap_limit {
-            format!(
-                "SELECT * FROM (\n{}\n) AS _ddk_recipe_query LIMIT {}",
-                sql_params::strip_trailing_semicolon(&bound_sql),
-                limit.saturating_add(1)
-            )
-        } else {
-            bound_sql
-        };
+        let fetch_limit = wrap_limit.then(|| limit.saturating_add(1));
 
         // Execute in-process on tokio using docspec::job::Job
+        let worker_temp_root = self.ensure_worker_temp_dir()?;
         self.next_query_seq = self.next_query_seq.saturating_add(1);
-        let scratch_dir = self
-            .worker_temp_dir
-            .join(format!("query-scratch-{}", self.next_query_seq));
+        let scratch_dir = worker_temp_root.join(format!("query-scratch-{}", self.next_query_seq));
         std::fs::create_dir_all(&scratch_dir).map_err(|err| {
             BridgeError::new(
                 "owner_unavailable",
@@ -1805,53 +2363,60 @@ impl OwnerWorker {
                 503,
             )
         })?;
-        let _scratch_guard = ScratchDirGuard {
-            path: scratch_dir.clone(),
-        };
 
         let limits = self.limits.clone();
         let timeout_dur = self.query_timeout;
+        let runtime = self.runtime.clone();
 
-        let mut encoded_rows = tokio::time::timeout(timeout_dur, async move {
-            let job = crate::job::Job::new(limits, scratch_dir).map_err(map_job_error)?;
-            for (input_name, file_path) in &verified_inputs {
-                job.register_parquet(input_name, file_path)
+        let mut encoded_rows = runtime.block_on(async move {
+            tokio::time::timeout(timeout_dur, async move {
+                let _scratch_guard = ScratchDirGuard {
+                    path: scratch_dir.clone(),
+                };
+                let job =
+                    crate::job::Job::new(limits.clone(), scratch_dir).map_err(map_job_error)?;
+                let exact_max_bytes = limits.max_batch_bytes.min(exact::MAX_EXACT_PAGE_BYTES);
+                let _page_permit = job
+                    .budget()
+                    .reserve(exact_max_bytes)
+                    .map_err(map_job_error)?;
+
+                for (input_name, file_path) in &verified_inputs {
+                    job.register_parquet(input_name, file_path)
+                        .await
+                        .map_err(map_job_error)?;
+                }
+                let mut stream = job
+                    .execute_bound_sql_stream(&bound_sql, bound_values, fetch_limit)
                     .await
                     .map_err(map_job_error)?;
-            }
-            let mut stream = job
-                .execute_sql_stream(&exec_sql)
-                .await
-                .map_err(map_job_error)?;
 
-            let mut exact_budget = ExactBudget::default();
-            let mut out_rows = Vec::with_capacity(limit.min(1024).saturating_add(1));
-            'batches: while let Some(batch) = stream
-                .try_next()
-                .await
-                .map_err(|df_err| map_job_error(crate::Error::from(df_err)))?
-            {
-                for r_idx in 0..batch.num_rows() {
-                    let row_val = exact::encode_batch_row(&batch, r_idx, &mut exact_budget)?;
-                    out_rows.push(row_val);
-                    if !wrap_limit && out_rows.len() > limit {
-                        break 'batches;
-                    }
-                    if wrap_limit && out_rows.len() > limit {
-                        break 'batches;
+                let mut exact_budget = ExactBudget::with_max_bytes(exact_max_bytes);
+                let mut out_rows = Vec::with_capacity(limit.min(1024).saturating_add(1));
+                'batches: while let Some(batch) = stream
+                    .try_next()
+                    .await
+                    .map_err(|df_err| map_job_error(crate::Error::from(df_err)))?
+                {
+                    for r_idx in 0..batch.num_rows() {
+                        let row_val = exact::encode_batch_row(&batch, r_idx, &mut exact_budget)?;
+                        out_rows.push(row_val);
+                        if out_rows.len() > limit {
+                            break 'batches;
+                        }
                     }
                 }
-            }
-            Ok::<Vec<Value>, BridgeError>(out_rows)
-        })
-        .await
-        .map_err(|_| {
-            BridgeError::new(
-                "native_read_unknown",
-                "DocSpec query execution timed out.",
-                408,
-            )
-        })??;
+                Ok::<Vec<Value>, BridgeError>(out_rows)
+            })
+            .await
+            .map_err(|_| {
+                BridgeError::new(
+                    "native_read_unknown",
+                    "DocSpec query execution timed out.",
+                    408,
+                )
+            })?
+        })?;
 
         let has_more = encoded_rows.len() > limit;
         if has_more {
@@ -1881,41 +2446,67 @@ impl OwnerWorker {
             receipt_bytes.push(b'\n');
             let receipt_sha = sha256_bytes(&receipt_bytes);
 
-            let (receipt_path, mut receipt_file) = loop {
+            let temp_path = retain_dir.join(format!(
+                ".query-receipt-{}-{}.tmp",
+                std::process::id(),
+                uuid::Uuid::new_v4()
+            ));
+            let mut temp_file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp_path)
+                .map_err(|err| {
+                    BridgeError::new(
+                        "owner_unavailable",
+                        format!("Failed creating temporary query receipt: {err}"),
+                        503,
+                    )
+                })?;
+            let mut temp_guard = TempReceiptGuard::new(temp_path.clone());
+            temp_file.write_all(&receipt_bytes).map_err(|err| {
+                BridgeError::new(
+                    "owner_unavailable",
+                    format!("Failed writing temporary query receipt: {err}"),
+                    503,
+                )
+            })?;
+            temp_file.sync_all().map_err(|err| {
+                BridgeError::new(
+                    "owner_unavailable",
+                    format!("Failed syncing temporary query receipt: {err}"),
+                    503,
+                )
+            })?;
+            drop(temp_file);
+
+            let receipt_path = loop {
                 self.next_receipt_seq = self.next_receipt_seq.saturating_add(1);
                 let candidate =
                     retain_dir.join(format!("query-receipt-{}.json", self.next_receipt_seq));
-                match OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&candidate)
-                {
-                    Ok(f) => break (candidate, f),
+                match std::fs::hard_link(&temp_path, &candidate) {
+                    Ok(()) => break candidate,
                     Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
                     Err(err) => {
                         return Err(BridgeError::new(
                             "owner_unavailable",
-                            format!("Failed to create retained query receipt: {err}"),
+                            format!("Failed publishing retained query receipt: {err}"),
                             503,
                         ));
                     }
                 }
             };
-            receipt_file.write_all(&receipt_bytes).map_err(|err| {
-                BridgeError::new(
-                    "owner_unavailable",
-                    format!("Failed writing retained query receipt: {err}"),
-                    503,
-                )
-            })?;
-            receipt_file.sync_all().map_err(|err| {
-                BridgeError::new(
-                    "owner_unavailable",
-                    format!("Failed syncing retained query receipt: {err}"),
-                    503,
-                )
-            })?;
-            drop(receipt_file);
+            let _ = std::fs::remove_file(&temp_path);
+            temp_guard.disarm();
+            File::open(retain_dir)
+                .and_then(|dir_fd| dir_fd.sync_all())
+                .map_err(|err| {
+                    BridgeError::new(
+                        "owner_unavailable",
+                        format!("Failed syncing retained receipt directory: {err}"),
+                        503,
+                    )
+                })?;
+
             let canon_receipt = std::fs::canonicalize(&receipt_path).unwrap_or(receipt_path);
             Some(json!({
                 "path": canon_receipt,
@@ -1947,8 +2538,7 @@ impl OwnerWorker {
         Ok(Value::Object(response))
     }
 
-    /// Dispatches a single parsed JSON-RPC-like envelope and returns the response envelope.
-    pub async fn handle_line(&mut self, line: &[u8]) -> Value {
+    fn handle_line(&mut self, line: &[u8]) -> Value {
         let parsed: Value = match serde_json::from_slice(line) {
             Ok(v) => v,
             Err(err) => {
@@ -1988,7 +2578,7 @@ impl OwnerWorker {
             (_, Err(err)) => Err(err),
             (Some("init"), Ok(params)) => self.init(params),
             (Some("read_page"), Ok(params)) => self.read_page(params),
-            (Some("run_query"), Ok(params)) => self.run_query(params).await,
+            (Some("run_query"), Ok(params)) => self.run_query(params),
             (Some("ping"), Ok(_)) => Ok(json!({ "ok": true })),
             (Some(other), Ok(_)) => Err(BridgeError::new(
                 "invalid_request",
@@ -2082,9 +2672,15 @@ fn write_json_line(writer: &mut impl Write, value: &Value) -> std::io::Result<()
     writer.flush()
 }
 
-/// Runs the persistent `stdin -> stdout` JSON-lines owner worker loop until `stdin` EOF.
-pub async fn serve_stdio(cli_limits: Option<Limits>) -> std::io::Result<()> {
-    let mut worker = OwnerWorker::new(cli_limits)?;
+/// Runs the persistent blocking `stdin -> stdout` JSON-lines owner worker loop until `stdin` EOF.
+///
+/// # Errors
+/// Returns standard I/O errors encountered when reading `stdin` or flushing `stdout`.
+pub fn serve_stdio(
+    cli_limits: Option<Limits>,
+    runtime: tokio::runtime::Handle,
+) -> std::io::Result<()> {
+    let mut worker = OwnerWorker::new(cli_limits, runtime);
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut reader = BufReader::with_capacity(IO_BUF_BYTES, stdin.lock());
@@ -2110,7 +2706,7 @@ pub async fn serve_stdio(cli_limits: Option<Limits>) -> std::io::Result<()> {
                 if line_buf.iter().all(u8::is_ascii_whitespace) {
                     continue;
                 }
-                let resp = worker.handle_line(&line_buf).await;
+                let resp = worker.handle_line(&line_buf);
                 write_json_line(&mut writer, &resp)?;
             }
         }

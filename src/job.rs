@@ -580,12 +580,27 @@ impl Job {
         export::export(self.sql(sql).await?, path, settings, &self.budget).await
     }
 
-    /// Executes read-only SQL under this job's admitted physical plan and memory pool.
-    pub(crate) async fn execute_sql_stream(
+    /// Returns the shared resource budget governing this job.
+    pub(crate) fn budget(&self) -> &Budget {
+        &self.budget
+    }
+
+    /// Executes read-only SQL with pre-bound `ScalarValue` parameters and optional row limit
+    /// under this job's admitted physical plan and memory pool.
+    pub(crate) async fn execute_bound_sql_stream(
         &self,
         sql: &str,
+        parameters: Vec<(String, datafusion::common::ScalarValue)>,
+        fetch_limit: Option<usize>,
     ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
-        plan::execute_stream(self.sql(sql).await?).await
+        let mut frame = self.sql_unbound(sql).await?;
+        if !parameters.is_empty() {
+            frame = frame.with_param_values(parameters)?;
+        }
+        if let Some(fetch) = fetch_limit {
+            frame = frame.limit(0, Some(fetch))?;
+        }
+        plan::execute_stream(frame).await
     }
 }
 
