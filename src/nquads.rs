@@ -333,11 +333,13 @@ pub async fn export_nquads(
         }
         max_est_row_bytes = max_est_row_bytes.max(rg_bytes.div_ceil(rows));
     }
-    let batch_rows = if max_est_row_bytes > 0 {
-        (budget.limits.max_batch_bytes / max_est_row_bytes).clamp(1, budget.limits.batch_rows)
-    } else {
-        budget.limits.batch_rows
-    };
+    let batch_rows = budget
+        .limits
+        .max_batch_bytes
+        .checked_div(max_est_row_bytes)
+        .map_or(budget.limits.batch_rows, |rows| {
+            rows.clamp(1, budget.limits.batch_rows)
+        });
     let reader = builder
         .with_projection(mask)
         .with_batch_size(batch_rows)
