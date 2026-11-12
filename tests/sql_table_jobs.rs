@@ -941,3 +941,455 @@ async fn create_defaults_data_model_properties_and_uncapped_layout_writes() {
         .unwrap_err();
     assert_eq!(err.error.code(), "invalid_spec");
 }
+
+/// One job holding only `operations` against the fixture's local catalog.
+fn operations_job(root: &std::path::Path, scratch: &str, operations: Value) -> Value {
+    json!({"scratch":root.join(scratch),"catalog_root":root.join("catalog"),"inputs":[],"steps":[],
+        "outputs":[],"table_operations":operations})
+}
+fn add_columns(expected_schema_id: i32, columns: Value) -> Value {
+    json!({"kind":"add_columns","name":"add","table":{"namespace":["archive"],"name":"captures"},
+        "expected_schema_id":expected_schema_id,"columns":columns})
+}
+fn note_and_score() -> Value {
+    json!([{"name":"note","type":"string","doc":"free text"},{"name":"score","type":"long"}])
+}
+async fn run_ok(value: Value) -> Value {
+    serde_json::to_value(
+        serde_json::from_value::<JobSpec>(value)
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap()
+}
+async fn run_code(value: Value) -> &'static str {
+    let failure = serde_json::from_value::<JobSpec>(value)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap_err();
+    failure.error.code()
+}
+/// Rows of `sql` over the exact native pin a table operation reported.
+async fn read_pin(root: &std::path::Path, scratch: &str, head: &Value, sql: &str) -> Value {
+    let job = json!({"scratch":root.join(scratch),"inputs":[selected_input(head)],"steps":[],"outputs":[],
+        "queries":[{"name":"rows","sql":sql}]});
+    run_ok(job).await["queries"][0]["data"].clone()
+}
+async fn captures_table(root: &std::path::Path) -> iceberg::table::Table {
+    docspec::storage::local_catalog(&root.join("catalog"))
+        .await
+        .unwrap()
+        .load_table(&TableIdent::new(
+            NamespaceIdent::new("archive".into()),
+            "captures".into(),
+        ))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn add_columns_assigns_fresh_ids_then_appends_carry_the_new_columns() {
+    let root = tempfile::tempdir().unwrap();
+    let created = run_ok(spec(root.path())).await;
+    let before = captures_table(root.path()).await;
+    let previous = before.metadata().current_schema_id();
+    let added = run_ok(operations_job(
+        root.path(),
+        "add-scratch",
+        json!([add_columns(previous, note_and_score())]),
+    ))
+    .await;
+    let report = &added["table_operations"][0];
+    let after = captures_table(root.path()).await;
+    let schema = after.metadata().current_schema();
+    assert_eq!(report["kind"], "add_columns");
+    assert_eq!(report["previous_schema_id"], previous);
+    assert_eq!(report["schema_id"], schema.schema_id());
+    assert_ne!(schema.schema_id(), previous);
+    // Fresh ids continue from the table's own last column id; the caller supplies none.
+    let last = before.metadata().last_column_id();
+    assert_eq!(
+        report["added_columns"],
+        json!([{"name":"note","field_id":last + 1},{"name":"score","field_id":last + 2}])
+    );
+    assert_eq!(
+        report["metadata_location"],
+        after.metadata_location().unwrap()
+    );
+    assert_eq!(
+        report["snapshot"],
+        created["table_operations"][2]["snapshot"]
+    );
+    assert_eq!(report["files"], json!([]));
+    let note = schema.field_by_name("note").unwrap();
+    assert!(!note.required);
+    assert_eq!(*note.field_type, Type::Primitive(PrimitiveType::String));
+    assert_eq!(note.doc.as_deref(), Some("free text"));
+    assert_eq!(
+        schema
+            .as_struct()
+            .fields()
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>(),
+        ["id", "note", "score"]
+    );
+
+    // The engine's append rule is unchanged: writer and table carry the same names.
+    let mut without = spec(root.path());
+    without["steps"][0]["sql"] = json!("SELECT cast(3 AS BIGINT) AS id");
+    without["table_operations"] = json!([without["table_operations"][2].clone()]);
+    without["table_operations"][0]["identity_sql"] =
+        json!("SELECT 'row-3-without-note' AS identity FROM pending LIMIT 1");
+    assert_eq!(run_code(without.clone()).await, "schema_mismatch");
+
+    let mut with = without;
+    with["steps"][0]["sql"] =
+        json!("SELECT cast(3 AS BIGINT) AS id,'third' AS note,cast(30 AS BIGINT) AS score");
+    with["table_operations"][0]["identity_sql"] =
+        json!("SELECT 'row-3-with-note' AS identity FROM pending LIMIT 1");
+    let appended = run_ok(with).await;
+    let head = &appended["table_operations"][0];
+    assert_eq!(head["files"][0]["rows"], 1);
+    // Results of other operation kinds keep their exact shape.
+    assert!(head.get("previous_schema_id").is_none());
+    assert!(head.get("added_columns").is_none());
+    assert_eq!(
+        read_pin(
+            root.path(),
+            "read-appended",
+            head,
+            "SELECT id,note,score FROM selected ORDER BY id"
+        )
+        .await,
+        json!([{"id":1,"note":null,"score":null},{"id":2,"note":null,"score":null},
+            {"id":3,"note":"third","score":30}])
+    );
+}
+
+#[tokio::test]
+async fn old_pins_keep_their_schema_while_old_rows_read_null_at_the_new_head() {
+    let root = tempfile::tempdir().unwrap();
+    let created = run_ok(spec(root.path())).await;
+    let old = &created["table_operations"][2];
+    let first = captures_table(root.path())
+        .await
+        .metadata()
+        .current_schema_id();
+    let added = run_ok(operations_job(
+        root.path(),
+        "add-scratch",
+        json!([add_columns(first, note_and_score())]),
+    ))
+    .await;
+    let new = &added["table_operations"][0];
+    assert_ne!(new["metadata_location"], old["metadata_location"]);
+    let all = "SELECT * FROM selected ORDER BY id";
+    // The add writes no snapshot; its own head already reads the columns, as null.
+    assert_eq!(
+        read_pin(root.path(), "read-added", new, all).await,
+        json!([{"id":1,"note":null,"score":null},{"id":2,"note":null,"score":null}])
+    );
+    assert_eq!(
+        read_pin(root.path(), "read-old-before", old, all).await,
+        json!([{"id":1},{"id":2}])
+    );
+    let mut append = spec(root.path());
+    append["steps"][0]["sql"] =
+        json!("SELECT cast(3 AS BIGINT) AS id,'third' AS note,cast(NULL AS BIGINT) AS score");
+    append["table_operations"] = json!([append["table_operations"][2].clone()]);
+    // The first append's current table carries the added column too.
+    append["table_operations"][0]["sql"] = json!(
+        "SELECT incoming.* FROM incoming LEFT ANTI JOIN existing ON incoming.id=existing.id AND existing.note IS NULL"
+    );
+    append["table_operations"][0]["identity_sql"] =
+        json!("SELECT 'row-3-with-note' AS identity FROM pending LIMIT 1");
+    let appended = run_ok(append).await;
+    assert_eq!(
+        read_pin(root.path(), "read-old", old, all).await,
+        json!([{"id":1},{"id":2}])
+    );
+    assert_eq!(
+        read_pin(
+            root.path(),
+            "read-head",
+            &appended["table_operations"][0],
+            all
+        )
+        .await,
+        json!([{"id":1,"note":null,"score":null},{"id":2,"note":null,"score":null},
+            {"id":3,"note":"third","score":null}])
+    );
+}
+
+#[tokio::test]
+async fn add_columns_refuses_required_conflicting_stale_nested_and_empty_requests() {
+    let root = tempfile::tempdir().unwrap();
+    run_ok(spec(root.path())).await;
+    let first = captures_table(root.path())
+        .await
+        .metadata()
+        .current_schema_id();
+    // Neither a required flag, a caller field id nor a nested type can be expressed.
+    let parses = |column: &Value| {
+        let job = operations_job(
+            root.path(),
+            "parse",
+            json!([add_columns(first, json!([column]))]),
+        );
+        serde_json::from_value::<JobSpec>(job).is_ok()
+    };
+    assert!(parses(
+        &json!({"name":"note","type":"string","doc":"free text"})
+    ));
+    for column in [
+        json!({"name":"note","type":"string","required":true}),
+        json!({"name":"note","type":"string","id":7}),
+        json!({"name":"note","type":{"type":"struct","fields":[]}}),
+    ] {
+        assert!(!parses(&column), "{column}");
+    }
+    for (columns, code) in [
+        (json!([]), "invalid_spec"),
+        (
+            json!([{"name":"parent.child","type":"string"}]),
+            "invalid_spec",
+        ),
+        (json!([{"name":"","type":"string"}]), "invalid_spec"),
+        (
+            json!([{"name":"note","type":"string"},{"name":"note","type":"string"}]),
+            "invalid_spec",
+        ),
+        // `id` exists with another type, and as a required column of the same type.
+        (json!([{"name":"id","type":"string"}]), "schema_mismatch"),
+        (json!([{"name":"id","type":"long"}]), "schema_mismatch"),
+        (
+            json!([{"name":"note","type":"string"},{"name":"id","type":"int"}]),
+            "schema_mismatch",
+        ),
+        // Nanosecond timestamps need format version 3; this table is version 2.
+        (
+            json!([{"name":"note","type":"string"},{"name":"at","type":"timestamp_ns"}]),
+            "schema_mismatch",
+        ),
+        (
+            json!([{"name":"at","type":"timestamptz_ns"}]),
+            "schema_mismatch",
+        ),
+    ] {
+        let before = captures_table(root.path()).await;
+        let job = operations_job(
+            root.path(),
+            "refused",
+            json!([add_columns(first, columns.clone())]),
+        );
+        assert_eq!(run_code(job).await, code, "{columns}");
+        let after = captures_table(root.path()).await;
+        assert_eq!(
+            after.metadata_location(),
+            before.metadata_location(),
+            "{columns}"
+        );
+    }
+    // Another writer moves the schema first; a caller still expecting the first refuses.
+    run_ok(operations_job(
+        root.path(),
+        "other-writer",
+        json!([add_columns(first, json!([{"name":"other","type":"int"}]))]),
+    ))
+    .await;
+    let moved = captures_table(root.path()).await;
+    assert_ne!(moved.metadata().current_schema_id(), first);
+    let stale = operations_job(
+        root.path(),
+        "stale",
+        json!([add_columns(first, note_and_score())]),
+    );
+    assert_eq!(run_code(stale).await, "stale_authority");
+    let after = captures_table(root.path()).await;
+    assert_eq!(after.metadata_location(), moved.metadata_location());
+    assert!(
+        after
+            .metadata()
+            .current_schema()
+            .field_by_name("note")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn repeating_add_columns_is_a_reported_noop() {
+    let root = tempfile::tempdir().unwrap();
+    run_ok(spec(root.path())).await;
+    let first = captures_table(root.path())
+        .await
+        .metadata()
+        .current_schema_id();
+    let added = run_ok(operations_job(
+        root.path(),
+        "add",
+        json!([add_columns(first, note_and_score())]),
+    ))
+    .await;
+    let added = &added["table_operations"][0];
+    let head = captures_table(root.path()).await;
+    let current = head.metadata().current_schema_id();
+    // The same request again (a retry after a lost response), and one naming the new schema.
+    for (scratch, expected) in [("repeat", first), ("current", current)] {
+        let repeat = run_ok(operations_job(
+            root.path(),
+            scratch,
+            json!([add_columns(expected, note_and_score())]),
+        ))
+        .await;
+        let report = &repeat["table_operations"][0];
+        assert_eq!(report["kind"], "add_columns");
+        assert_eq!(report["added_columns"], json!([]), "{scratch}");
+        assert_eq!(report["previous_schema_id"], current);
+        assert_eq!(report["schema_id"], current);
+        assert_eq!(report["metadata_location"], added["metadata_location"]);
+        assert_eq!(
+            captures_table(root.path()).await.metadata_location(),
+            head.metadata_location()
+        );
+    }
+    // Present columns are skipped; only the missing one is added, at the current schema.
+    let partial = run_ok(operations_job(
+        root.path(),
+        "partial",
+        json!([add_columns(
+            current,
+            json!([{"name":"note","type":"string"},{"name":"extra","type":"date"}])
+        )]),
+    ))
+    .await;
+    assert_eq!(
+        partial["table_operations"][0]["added_columns"],
+        json!([{"name":"extra","field_id":head.metadata().last_column_id() + 1}])
+    );
+}
+
+#[tokio::test]
+async fn add_columns_takes_every_primitive_the_table_format_holds() {
+    let root = tempfile::tempdir().unwrap();
+    run_ok(spec(root.path())).await;
+    let first = captures_table(root.path())
+        .await
+        .metadata()
+        .current_schema_id();
+    let v2 = [
+        "boolean",
+        "int",
+        "long",
+        "float",
+        "double",
+        "decimal(10,2)",
+        "date",
+        "time",
+        "timestamp",
+        "timestamptz",
+        "string",
+        "uuid",
+        "fixed[4]",
+        "binary",
+    ];
+    let columns = v2
+        .iter()
+        .enumerate()
+        .map(|(index, kind)| json!({"name":format!("c{index}"),"type":kind}))
+        .collect::<Vec<_>>();
+    let added = run_ok(operations_job(
+        root.path(),
+        "v2",
+        json!([add_columns(first, json!(columns))]),
+    ))
+    .await;
+    assert_eq!(
+        added["table_operations"][0]["added_columns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        v2.len()
+    );
+    let schema = captures_table(root.path())
+        .await
+        .metadata()
+        .current_schema()
+        .clone();
+    for (index, kind) in v2.iter().enumerate() {
+        let field = schema.field_by_name(&format!("c{index}")).unwrap();
+        let parsed: PrimitiveType = serde_json::from_value(json!(kind)).unwrap();
+        assert_eq!(*field.field_type, Type::Primitive(parsed));
+    }
+    // A version 3 table takes the nanosecond timestamps a version 2 table refuses.
+    let catalog = docspec::storage::local_catalog(&root.path().join("catalog"))
+        .await
+        .unwrap();
+    let ident = TableIdent::new(NamespaceIdent::new("archive".into()), "events_v3".into());
+    let v3 = catalog
+        .create_table(
+            ident.namespace(),
+            iceberg::TableCreation::builder()
+                .name(ident.name().into())
+                .location(root.path().join("v3").to_string_lossy().into_owned())
+                .schema(schema.as_ref().clone())
+                .format_version(iceberg::spec::FormatVersion::V3)
+                .build(),
+        )
+        .await
+        .unwrap();
+    let mut operation = add_columns(
+        v3.metadata().current_schema_id(),
+        json!([{"name":"at","type":"timestamp_ns"},{"name":"at_utc","type":"timestamptz_ns"}]),
+    );
+    operation["table"] = json!({"namespace":["archive"],"name":"events_v3"});
+    let added = run_ok(operations_job(root.path(), "v3", json!([operation]))).await;
+    assert_eq!(
+        added["table_operations"][0]["added_columns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn a_commit_racing_the_add_lands_and_the_add_refuses_before_its_commit() {
+    use super::sql_tables::AuthorityCatalog;
+    let root = tempfile::tempdir().unwrap();
+    run_ok(spec(root.path())).await;
+    let first = captures_table(root.path())
+        .await
+        .metadata()
+        .current_schema_id();
+    let catalog = docspec::storage::local_catalog(&root.path().join("catalog"))
+        .await
+        .unwrap();
+    // Load 0 resolves the head and passes the schema check; another writer then
+    // commits before load 1, the commit's own reload.
+    let racing = Arc::new(AuthorityCatalog::racing(catalog, 1));
+    let mut job = operations_job(
+        root.path(),
+        "raced",
+        json!([add_columns(first, note_and_score())]),
+    );
+    job.as_object_mut().unwrap().remove("catalog_root");
+    let failure = serde_json::from_value::<JobSpec>(job)
+        .unwrap()
+        .run_with_catalog(limits(), racing.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(failure.error.code(), "stale_authority", "{failure}");
+    assert_eq!(racing.update_count(), 0);
+    let schema = captures_table(root.path())
+        .await
+        .metadata()
+        .current_schema()
+        .clone();
+    assert!(schema.field_by_name("racer").is_some());
+    assert!(schema.field_by_name("note").is_none());
+    assert!(schema.field_by_name("score").is_none());
+}

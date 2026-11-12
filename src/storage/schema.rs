@@ -68,6 +68,32 @@ pub(crate) fn read_schema(table: &Table) -> Result<SchemaRef> {
     Ok(Arc::new(iceberg::arrow::schema_to_arrow_schema(current)?))
 }
 
+/// Whether `current` only appends optional top-level primitive columns to `written`.
+///
+/// A head snapshot written under `written` then reads under `current` with
+/// unchanged values for every older column, older files reading the additions
+/// as null. Any other difference keeps the snapshot's own schema.
+pub(crate) fn appends_nullable_columns(
+    written: &iceberg::spec::Schema,
+    current: &iceberg::spec::Schema,
+) -> bool {
+    let (old, new) = (written.as_struct().fields(), current.as_struct().fields());
+    let identifiers = |schema: &iceberg::spec::Schema| {
+        schema
+            .identifier_field_ids()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    new.len() > old.len()
+        && new[..old.len()] == old[..]
+        && identifiers(written) == identifiers(current)
+        && new[old.len()..].iter().all(|field| {
+            !field.required
+                && field.field_type.is_primitive()
+                && field.initial_default.is_none()
+                && field.write_default.is_none()
+        })
+}
+
 fn unsupported() -> Error {
     Error::refusal(
         "unsupported_schema_evolution",
