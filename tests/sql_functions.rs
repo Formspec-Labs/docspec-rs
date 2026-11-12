@@ -690,3 +690,56 @@ async fn json_many_preserves_independent_skip_limits_across_requested_branches()
         );
     }
 }
+
+#[tokio::test]
+async fn iri_encode_and_nquad_escape_handle_utf8_controls_and_string_representations() {
+    let encoded = scalar(
+        "SELECT
+            iri_encode('Az09-._~') AS unreserved,
+            iri_encode('hello world/a?b=c#d') AS reserved,
+            iri_encode('café/λ') AS utf8_multibyte,
+            iri_encode(CAST(NULL AS VARCHAR)) AS null_val",
+    )
+    .await;
+    assert_eq!(
+        encoded,
+        json!([{
+            "unreserved": "Az09-._~",
+            "reserved": "hello%20world%2Fa%3Fb%3Dc%23d",
+            "utf8_multibyte": "caf%C3%A9%2F%CE%BB",
+            "null_val": null
+        }])
+    );
+
+    let escaped = scalar(
+        "SELECT
+            nquad_escape('plain text café 🚀') AS passthrough,
+            nquad_escape(concat('a', chr(92), 'b\"c', chr(10), 'd', chr(13), 'e', chr(9), 'f', chr(8), 'g', chr(12), 'h')) AS named_escapes,
+            nquad_escape(concat(chr(0), chr(31), chr(127))) AS control_hex,
+            nquad_escape(CAST(NULL AS VARCHAR)) AS null_val",
+    )
+    .await;
+    assert_eq!(
+        escaped,
+        json!([{
+            "passthrough": "plain text café 🚀",
+            "named_escapes": "a\\\\b\\\"c\\nd\\re\\tf\\bg\\fh",
+            "control_hex": "\\u0000\\u001F\\u007F",
+            "null_val": null
+        }])
+    );
+
+    for kind in ["Utf8", "LargeUtf8", "Utf8View"] {
+        let res = scalar(&format!(
+            "SELECT
+                iri_encode(arrow_cast('a b/c', '{kind}')) AS iri,
+                nquad_escape(arrow_cast('x\"y', '{kind}')) AS nq"
+        ))
+        .await;
+        assert_eq!(
+            res,
+            json!([{"iri": "a%20b%2Fc", "nq": "x\\\"y"}]),
+            "representation {kind}"
+        );
+    }
+}

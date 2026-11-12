@@ -1,3 +1,4 @@
+// Rust guideline compliant 2026-02-21
 //! Recoverable dataset operations backed by an injected Iceberg catalog.
 //!
 //! Lifecycle records live in Iceberg. The catalog database contains only native
@@ -13,6 +14,8 @@ pub mod export;
 pub mod http;
 pub mod job;
 pub mod model;
+pub mod nquads;
+pub mod owner_worker;
 mod progress;
 mod query;
 pub mod restore;

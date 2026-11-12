@@ -532,6 +532,17 @@ enum Command {
         #[arg(long)]
         shutdown_on_stdin_eof: bool,
     },
+    /// Stream a projected string column from Parquet into an atomic N-Quads file.
+    ExportNquads {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value = "nquad")]
+        column: String,
+    },
+    /// Serve the persistent JSON-lines catalog owner worker over stdin and stdout.
+    OwnerWorker,
 }
 
 #[cfg(feature = "test-util")]
@@ -644,9 +655,10 @@ async fn async_main() -> anyhow::Result<()> {
         )
         .into());
     }
+    let parsed_limits: Option<Limits> = cli.limits.map(read_json).transpose()?;
     #[cfg(feature = "remote")]
-    let explicit_limits = cli.limits.is_some();
-    let limits: Limits = cli.limits.map(read_json).transpose()?.unwrap_or_default();
+    let explicit_limits = parsed_limits.is_some();
+    let limits: Limits = parsed_limits.clone().unwrap_or_default();
     match cli.command {
         #[cfg(feature = "remote")]
         Command::CreateFile(SpecArg { spec }) => {
@@ -788,6 +800,18 @@ async fn async_main() -> anyhow::Result<()> {
                 read_evidence(&release, &budget).await?
             };
             write_stream(output, stream).await?;
+        }
+        Command::ExportNquads {
+            input,
+            output,
+            column,
+        } => {
+            let result = docspec::nquads::export_nquads(&input, &output, &column, &limits)?;
+            serde_json::to_writer(std::io::stdout(), &result)?;
+            println!();
+        }
+        Command::OwnerWorker => {
+            docspec::owner_worker::serve_stdio(parsed_limits).await?;
         }
         command => {
             let engine = if let Some(path) = &cli.snapshot_source {
@@ -1535,6 +1559,8 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
                 | Command::JobPublicationIntent(_)
                 | Command::PlanPublicationIntentRetirement(_)
                 | Command::RetirePublicationIntent(_)
+                | Command::ExportNquads { .. }
+                | Command::OwnerWorker
         ) || matches!(
             &cli.command,
             Command::Read { group, .. }

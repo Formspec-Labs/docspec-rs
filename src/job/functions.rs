@@ -36,6 +36,8 @@ enum Kind {
     JsonArray,
     JsonCanonical,
     HttpDate,
+    IriEncode,
+    NquadEscape,
 }
 
 pub(super) fn byte_limit(function: &ScalarUDF) -> Option<usize> {
@@ -58,6 +60,8 @@ impl Kind {
             Self::JsonArray => "json_array",
             Self::JsonCanonical => "json_canonical",
             Self::HttpDate => "http_date",
+            Self::IriEncode => "iri_encode",
+            Self::NquadEscape => "nquad_escape",
         }
     }
 }
@@ -101,6 +105,8 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::
         Kind::JsonArray,
         Kind::JsonCanonical,
         Kind::HttpDate,
+        Kind::IriEncode,
+        Kind::NquadEscape,
     ] {
         let signature = if kind == Kind::JsonArray {
             Signature::one_of(
@@ -512,7 +518,12 @@ impl GenericFunction {
             } else {
                 0
             };
-            let factor = if self.kind == Kind::Resolve { 8 } else { 4 };
+            let factor = match self.kind {
+                Kind::Resolve => 8,
+                Kind::NquadEscape => 6,
+                Kind::IriEncode => 3,
+                _ => 4,
+            };
             allowance = allowance.saturating_add(
                 input
                     .saturating_add(base)
@@ -539,6 +550,8 @@ impl GenericFunction {
                     Kind::Resolve => resolve(value, get(1, index)?),
                     Kind::Normalize => Some(normalize(value)),
                     Kind::Decode => Some(decode(value)),
+                    Kind::IriEncode => Some(iri_encode(value)),
+                    Kind::NquadEscape => Some(nquad_escape(value)),
                     Kind::UrlFilename => url::Url::parse(value).ok().and_then(|u| {
                         u.path_segments()
                             .and_then(|mut segments| segments.next_back())
@@ -593,6 +606,54 @@ fn decode(value: &str) -> String {
 }
 fn unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || b"-._~".contains(&byte)
+}
+fn iri_encode(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let bytes = value.as_bytes();
+    let out_len = bytes.iter().fold(0usize, |acc, &byte| {
+        acc.saturating_add(if unreserved(byte) { 1 } else { 3 })
+    });
+    let mut out = String::with_capacity(out_len);
+    for &byte in bytes {
+        if unreserved(byte) {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0F) as usize] as char);
+        }
+    }
+    out
+}
+fn nquad_escape(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let out_len = value.bytes().fold(0usize, |acc, byte| {
+        acc.saturating_add(match byte {
+            b'\\' | b'"' | b'\n' | b'\r' | b'\t' | 0x08 | 0x0C => 2,
+            0x00..=0x1F | 0x7F => 6,
+            _ => 1,
+        })
+    });
+    let mut out = String::with_capacity(out_len);
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\x08' => out.push_str("\\b"),
+            '\x0C' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 || (c as u32) == 0x7F => {
+                let byte = c as u8;
+                out.push_str("\\u00");
+                out.push(HEX[(byte >> 4) as usize] as char);
+                out.push(HEX[(byte & 0x0F) as usize] as char);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 fn hex(byte: u8) -> Option<u8> {
     match byte {
@@ -754,6 +815,8 @@ mod admission_tests {
         .unwrap();
         for kind in [
             Kind::Normalize,
+            Kind::IriEncode,
+            Kind::NquadEscape,
             Kind::JsonCanonical,
             Kind::JsonArray,
             Kind::HttpDate,
@@ -789,5 +852,21 @@ mod admission_tests {
             drop(buffer);
             drop(budget.reserve(budget.limits.memory_bytes / 2).unwrap());
         }
+    }
+
+    #[test]
+    fn iri_encode_and_nquad_escape_match_rfc3986_and_w3c_nquads() {
+        assert_eq!(
+            iri_encode("AZaz09-._~ /?%#é🚀"),
+            "AZaz09-._~%20%2F%3F%25%23%C3%A9%F0%9F%9A%80"
+        );
+        assert_eq!(iri_encode(""), "");
+        assert_eq!(
+            nquad_escape(
+                "quote \" slash \\ nl \n cr \r tab \t bs \x08 ff \x0C nul \x00 us \x1F del \x7F utf8 é🚀"
+            ),
+            r#"quote \" slash \\ nl \n cr \r tab \t bs \b ff \f nul \u0000 us \u001F del \u007F utf8 é🚀"#
+        );
+        assert_eq!(nquad_escape(""), "");
     }
 }

@@ -579,6 +579,14 @@ impl Job {
     ) -> Result<ExportedFile> {
         export::export(self.sql(sql).await?, path, settings, &self.budget).await
     }
+
+    /// Executes read-only SQL under this job's admitted physical plan and memory pool.
+    pub(crate) async fn execute_sql_stream(
+        &self,
+        sql: &str,
+    ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
+        plan::execute_stream(self.sql(sql).await?).await
+    }
 }
 
 /// Puts the input's name and path ahead of a failure to list or read it.

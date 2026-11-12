@@ -72,6 +72,7 @@ mod update_relationship;
 mod updates;
 
 mod nested_writer;
+mod owner_and_nquads;
 mod sql_components;
 mod sql_functions;
 mod sql_table_jobs;
