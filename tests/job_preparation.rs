@@ -40,12 +40,19 @@ fn source_schema() -> Schema {
 }
 
 fn request(root: &Path, spec: &Value) -> PrepareJobSpec {
+    request_with(
+        root,
+        spec,
+        &json!([{"name":"events","schema_ipc_base64":ipc(&source_schema())}]),
+    )
+}
+
+fn request_with(root: &Path, spec: &Value, inputs: &Value) -> PrepareJobSpec {
     let path = root.join("job.json");
     let bytes = serde_json::to_vec_pretty(spec).unwrap();
     std::fs::write(&path, &bytes).unwrap();
     serde_json::from_value(
-        json!({"job":{"path":path,"sha256":format!("{:x}",Sha256::digest(&bytes))},
-        "inputs":[{"name":"events","schema_ipc_base64":ipc(&source_schema())}]}),
+        json!({"job":{"path":path,"sha256":format!("{:x}",Sha256::digest(&bytes))},"inputs":inputs}),
     )
     .unwrap()
 }
@@ -844,5 +851,88 @@ async fn native_iceberg_schema_declarations_use_maintained_ids_and_explicit_form
         assert_eq!(error.code(), "invalid_schema");
         assert!(error.to_string().contains("schema ID differs"), "{error}");
     }
+    assert!(!root.path().join("must-not-exist").exists());
+}
+
+/// The SpicyRegs data-map SQL trial, copied unchanged from spicy-stack `b56c42a`
+/// (`datamap/experiments/sql-check`): its JobSpec of six SQL steps, declared
+/// inputs, and the two faults DataFusion coerced into silently empty results.
+fn trial() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/datamap_sql_trial")
+}
+
+fn trial_input(name: &str) -> Value {
+    let path = trial().join(format!("inputs/{name}.arrow.json"));
+    let sha256 = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
+    json!({"name":name,"schema_artifact":{"path":path,"sha256":sha256,"format":"arrow_serde_json"}})
+}
+
+async fn trial_refusal(root: &Path, step: &str, fault: &str) -> String {
+    let mut spec: Value =
+        serde_json::from_slice(&std::fs::read(trial().join("job.json")).unwrap()).unwrap();
+    spec["scratch"] = json!(root.join("must-not-exist/scratch"));
+    let inputs = spec["inputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|input| trial_input(input["name"].as_str().unwrap()))
+        .collect();
+    if !fault.is_empty() {
+        let steps = spec["steps"].as_array_mut().unwrap();
+        let step = steps.iter_mut().find(|candidate| candidate["name"] == step);
+        step.unwrap()["sql"] = json!(std::fs::read_to_string(trial().join(fault)).unwrap());
+    }
+    match request_with(root, &spec, &Value::Array(inputs))
+        .prepare(limits())
+        .await
+    {
+        Ok(prepared) => {
+            assert_eq!(
+                (
+                    prepared.steps.len(),
+                    prepared.outputs.len(),
+                    prepared.queries.len()
+                ),
+                (6, 3, 7)
+            );
+            String::new()
+        }
+        Err(error) => {
+            assert_eq!(error.code(), "implicit_cast", "{error}");
+            error.to_string()
+        }
+    }
+}
+
+#[tokio::test]
+async fn implicit_casts_between_type_families_refuse_and_the_trial_baseline_stays_clean() {
+    let root = tempfile::tempdir().unwrap();
+    assert_eq!(trial_refusal(root.path(), "", "").await, "");
+    let f3 = trial_refusal(
+        root.path(),
+        "member_voting_record",
+        "F3-string-integer-join.sql",
+    )
+    .await;
+    assert!(f3.contains("c.number (Int64 to Utf8)"), "{f3}");
+    let f3b = trial_refusal(root.path(), "rule_history", "F3b-date-integer-compare.sql").await;
+    assert!(f3b.contains("Int64(20200101) (Int64 to Date32)"), "{f3b}");
+
+    let inputs = ["member_votes", "roll_calls"].map(|name| {
+        let schema = std::fs::read(trial().join(format!("inputs/{name}.arrow.json"))).unwrap();
+        json!({"name":name,"schema":serde_json::from_slice::<Value>(&schema).unwrap()})
+    });
+    let plan = |sql: &str| {
+        serde_json::from_value::<docspec::job::JobPlanSpec>(json!({
+            "scratch":root.path().join("job-plan"),"inputs":inputs,
+            "calculation":{"format":"sql","sql":sql,"parameters":{"1":"P000197"}}}))
+        .unwrap()
+        .prepare(limits())
+    };
+    let fault = std::fs::read_to_string(trial().join("F3-string-integer-join.sql")).unwrap();
+    assert_eq!(plan(&fault).await.unwrap_err().code(), "implicit_cast");
+    plan(&fault.replace("c.number", "c.roll_call_id"))
+        .await
+        .unwrap();
     assert!(!root.path().join("must-not-exist").exists());
 }

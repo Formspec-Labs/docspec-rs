@@ -67,6 +67,8 @@ pub struct Job {
     context: SessionContext,
     budget: Budget,
     relation_aliases: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+    /// Schema-only planners refuse casts DataFusion adds between type families.
+    refuse_implicit_casts: bool,
     #[cfg(feature = "remote")]
     remote: Option<crate::storage::remote::RemoteStorage>,
 }
@@ -163,9 +165,16 @@ impl Job {
             context,
             budget,
             relation_aliases: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+            refuse_implicit_casts: false,
             #[cfg(feature = "remote")]
             remote: None,
         })
+    }
+
+    /// Makes later SQL planning refuse implicit casts between type families.
+    fn refusing_implicit_casts(mut self) -> Self {
+        self.refuse_implicit_casts = true;
+        self
     }
 
     /// Creates the SQL service with explicit remote catalog and object I/O.

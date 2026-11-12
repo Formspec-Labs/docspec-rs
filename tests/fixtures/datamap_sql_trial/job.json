@@ -1,0 +1,217 @@
+{
+ "scratch": "scratch",
+ "inputs": [
+  {
+   "kind": "parquet",
+   "name": "bill_status",
+   "path": "data/bill_status.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "comment_campaigns",
+   "path": "data/comment_campaigns.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "entity_matches",
+   "path": "data/entity_matches.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "federal_register_documents",
+   "path": "data/federal_register_documents.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "member_votes",
+   "path": "data/member_votes.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "organizations",
+   "path": "data/organizations.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "regulations_comments",
+   "path": "data/regulations_comments.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "regulations_dockets",
+   "path": "data/regulations_dockets.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "regulations_documents",
+   "path": "data/regulations_documents.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "roll_calls",
+   "path": "data/roll_calls.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "rulemakings",
+   "path": "data/rulemakings.parquet"
+  },
+  {
+   "kind": "parquet",
+   "name": "unified_agenda_entries",
+   "path": "data/unified_agenda_entries.parquet"
+  }
+ ],
+ "steps": [
+  {
+   "name": "bills",
+   "sql": "-- One bill or resolution in one Congress, from its Congress.gov bill-status record.\n-- Status is the highest milestone among the record's action codes, in the\n-- unitedstates/congress vocabulary. This covers the main milestones only; the\n-- full status rules also read chamber, vote type and resolution kind.\nSELECT\n  lower(b.type_text) || b.number_text || '-' || b.congress_text AS bill_id,\n  CAST(b.congress_text AS INTEGER) AS congress,\n  lower(b.type_text) AS bill_type,\n  CAST(b.number_text AS INTEGER) AS number,\n  b.bill_title AS title,\n  (regexp_match(b.sponsors, '<bioguideId>([^<]+)</bioguideId>'))[1] AS sponsor_person_id,\n  CAST(b.introduced_date_text AS DATE) AS introduced_date,\n  CAST(b.latest_action_date_text AS DATE) AS latest_action_date,\n  (regexp_match(b.latest_action, '<text>([^<]*)</text>'))[1] AS latest_action,\n  CASE\n    WHEN b.actions LIKE '%<actionCode>36000</actionCode>%'\n      OR b.actions LIKE '%<actionCode>E40000</actionCode>%' THEN 'ENACTED:SIGNED'\n    WHEN b.actions LIKE '%<actionCode>31000</actionCode>%' THEN 'PROV_KILL:VETO'\n    WHEN b.actions LIKE '%<actionCode>28000</actionCode>%' THEN 'PASSED:BILL'\n    WHEN b.actions LIKE '%<actionCode>8000</actionCode>%'\n      AND b.actions LIKE '%<actionCode>17000</actionCode>%' THEN 'PASSED:BILL'\n    WHEN b.actions LIKE '%<actionCode>8000</actionCode>%' THEN 'PASS_OVER:HOUSE'\n    WHEN b.actions LIKE '%<actionCode>17000</actionCode>%' THEN 'PASS_OVER:SENATE'\n    WHEN b.actions LIKE '%<actionCode>5000</actionCode>%'\n      OR b.actions LIKE '%<actionCode>14000</actionCode>%' THEN 'REPORTED'\n    ELSE 'INTRODUCED'\n  END AS status,\n  (regexp_match(b.actions, 'Became Public Law No: ([0-9]+-[0-9]+)'))[1] AS public_law_id\nFROM bill_status AS b\n",
+   "materialize": false,
+   "parameters": {}
+  },
+  {
+   "name": "rulemaking_timeline",
+   "sql": "-- One dated event in one rulemaking, from one source document.\n-- A rulemaking is keyed by its RIN, or by its docket when the document names no RIN.\n-- A Federal Register document is identified by its number and publication date: corrections reuse numbers.\n-- DataFusion needs distinct names within every UNION branch, so repeated columns are aliased.\nWITH fr AS (\n  SELECT\n    unnest(CASE WHEN array_length(d.regulation_id_numbers) > 0\n                THEN d.regulation_id_numbers ELSE d.docket_ids END) AS rulemaking_id,\n    d.document_number || '@' || d.publication_date AS source_key,\n    d.document_number, d.title, d.type, d.publication_date, d.publication_date_typed,\n    d.comments_close_on_typed, d.effective_on_typed\n  FROM federal_register_documents AS d\n),\nregs AS (\n  SELECT\n    coalesce(json_get_str(k.attributes, 'rin'), d.attributes_docket_id) AS rulemaking_id,\n    d.id, d.attributes_title AS title, json_get_str(d.attributes, 'frDocNum') AS fr_document_number,\n    CAST(substr(json_get_str(d.attributes, 'commentStartDate'), 1, 10) AS DATE) AS opens,\n    CAST(substr(json_get_str(d.attributes, 'commentEndDate'), 1, 10) AS DATE) AS closes\n  FROM regulations_documents AS d\n  LEFT JOIN regulations_dockets AS k ON k.id = d.attributes_docket_id\n)\nSELECT rulemaking_id,\n       CASE type WHEN 'Proposed Rule' THEN 'proposed_rule' WHEN 'Rule' THEN 'final_rule' ELSE 'other' END AS event,\n       source_key, publication_date_typed AS event_date, title,\n       document_number AS fr_document_number, publication_date AS fr_publication_date,\n       CAST(NULL AS VARCHAR) AS regulations_document_id\nFROM fr\nUNION ALL\nSELECT rulemaking_id, 'comment_period_closes', source_key, comments_close_on_typed, title,\n       document_number AS fr_document_number, publication_date, CAST(NULL AS VARCHAR)\nFROM fr WHERE comments_close_on_typed IS NOT NULL\nUNION ALL\nSELECT rulemaking_id, 'effective', source_key, effective_on_typed, title,\n       document_number AS fr_document_number, publication_date, CAST(NULL AS VARCHAR)\nFROM fr WHERE effective_on_typed IS NOT NULL\nUNION ALL\nSELECT rulemaking_id, 'comment_period_opens', id AS source_key, opens, title, fr_document_number, CAST(NULL AS VARCHAR), id AS regulations_document_id\nFROM regs WHERE opens IS NOT NULL\nUNION ALL\nSELECT rulemaking_id, 'comment_period_closes', id AS source_key, closes, title, fr_document_number, CAST(NULL AS VARCHAR), id AS regulations_document_id\nFROM regs WHERE closes IS NOT NULL\nUNION ALL\nSELECT a.rin_text, 'agenda_listing', a.rin_text || '@' || a.publication_publication_id_text,\n       to_date(a.publication_publication_id_text || '01', '%Y%m%d'), a.rule_title_text,\n       CAST(NULL AS VARCHAR) AS fr_document_number, CAST(NULL AS VARCHAR) AS fr_publication_date,\n       CAST(NULL AS VARCHAR) AS regulations_document_id\nFROM unified_agenda_entries AS a\n",
+   "materialize": false,
+   "parameters": {}
+  },
+  {
+   "name": "docket_comments",
+   "sql": "-- One Regulations.gov docket, with totals of its public comments.\nWITH comments AS (\n  SELECT c.id, c.attributes_docket_id AS docket_id,\n         coalesce(c.attributes_duplicate_comments, 0) AS duplicates,\n         CAST(c.attributes_posted_date_typed AS DATE) AS posted\n  FROM regulations_comments AS c\n  WHERE c.attributes_docket_id IS NOT NULL\n),\ntotals AS (\n  SELECT docket_id, count(*) AS comments_posted, count(*) + sum(duplicates) AS comments_received,\n         min(posted) AS first_posted, max(posted) AS last_posted\n  FROM comments\n  GROUP BY docket_id\n),\ndocket_rulemakings AS (\n  -- A docket can be named by more than one rulemaking; keep one so the docket stays one row.\n  SELECT docket_id, min(rulemaking_id) AS rulemaking_id, min(agency_organization_id) AS agency_organization_id\n  FROM (SELECT unnest(r.docket_ids) AS docket_id, r.rulemaking_id, r.agency_organization_id\n        FROM rulemakings AS r) AS named\n  GROUP BY docket_id\n),\ncommenting_organizations AS (\n  SELECT c.docket_id, count(DISTINCT o.organization_id) AS organizations\n  FROM comments AS c\n  JOIN entity_matches AS m\n    ON m.left_scheme = 'regulations_gov_comment' AND m.left_id = c.id\n   AND m.entity_kind = 'organization' AND m.decision = 'same'\n  JOIN organizations AS o ON o.organization_id = m.right_id\n  GROUP BY c.docket_id\n),\ncampaigns AS (\n  SELECT docket_id, sum(comments) AS comments\n  FROM comment_campaigns\n  WHERE comments > 1\n  GROUP BY docket_id\n)\nSELECT t.docket_id, r.rulemaking_id, r.agency_organization_id,\n       t.comments_posted, t.comments_received,\n       coalesce(o.organizations, 0) AS organizations_commenting,\n       coalesce(k.comments, 0) AS campaign_comments,\n       t.first_posted, t.last_posted\nFROM totals AS t\nLEFT JOIN docket_rulemakings AS r ON r.docket_id = t.docket_id\nLEFT JOIN commenting_organizations AS o ON o.docket_id = t.docket_id\nLEFT JOIN campaigns AS k ON k.docket_id = t.docket_id\n",
+   "materialize": true,
+   "parameters": {}
+  },
+  {
+   "name": "open_comment_periods",
+   "sql": "-- What can I comment on right now?\nSELECT r.rulemaking_id, r.title, r.agency_organization_id, t.event_date AS comments_close, t.regulations_document_id\nFROM rulemaking_timeline AS t\nJOIN rulemakings AS r ON r.rulemaking_id = t.rulemaking_id\nWHERE t.event = 'comment_period_closes' AND t.event_date >= CAST($1 AS DATE)\nORDER BY t.event_date, r.rulemaking_id\n",
+   "materialize": false,
+   "parameters": {
+    "1": "2020-01-01"
+   }
+  },
+  {
+   "name": "member_voting_record",
+   "sql": "-- How did this member vote?\nSELECT c.vote_date, c.chamber, c.question, c.result, c.bill_id, v.vote, v.vote_as_recorded\nFROM member_votes AS v\nJOIN roll_calls AS c ON c.roll_call_id = v.roll_call_id\nWHERE v.person_id = $1\nORDER BY c.vote_date DESC, c.roll_call_id\n",
+   "materialize": false,
+   "parameters": {
+    "1": "P000197"
+   }
+  },
+  {
+   "name": "rule_history",
+   "sql": "-- What happened to this rule, and when?\nSELECT event_date, event, title, fr_document_number, regulations_document_id\nFROM rulemaking_timeline\nWHERE rulemaking_id = $1\nORDER BY event_date, event, source_key\n",
+   "materialize": false,
+   "parameters": {
+    "1": "1557-AB14"
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "name": "bills.parquet",
+   "path": "out/bills.parquet",
+   "sql": "SELECT * FROM bills",
+   "settings": {
+    "profile": "whole",
+    "row_group_rows": 65536,
+    "columns": [],
+    "dictionary_columns": [],
+    "order_by": [
+     {
+      "field": "bill_id",
+      "direction": "asc",
+      "nulls": "nulls_last"
+     }
+    ],
+    "delta_columns": [],
+    "key_column": null,
+    "created_by": "datamap-sql-trial",
+    "footer_limit": 1048576
+   }
+  },
+  {
+   "name": "rulemaking_timeline.parquet",
+   "path": "out/rulemaking_timeline.parquet",
+   "sql": "SELECT * FROM rulemaking_timeline",
+   "settings": {
+    "profile": "whole",
+    "row_group_rows": 65536,
+    "columns": [],
+    "dictionary_columns": [],
+    "order_by": [
+     {
+      "field": "rulemaking_id",
+      "direction": "asc",
+      "nulls": "nulls_last"
+     },
+     {
+      "field": "event",
+      "direction": "asc",
+      "nulls": "nulls_last"
+     },
+     {
+      "field": "source_key",
+      "direction": "asc",
+      "nulls": "nulls_last"
+     }
+    ],
+    "delta_columns": [],
+    "key_column": null,
+    "created_by": "datamap-sql-trial",
+    "footer_limit": 1048576
+   }
+  },
+  {
+   "name": "docket_comments.parquet",
+   "path": "out/docket_comments.parquet",
+   "sql": "SELECT * FROM docket_comments",
+   "settings": {
+    "profile": "whole",
+    "row_group_rows": 65536,
+    "columns": [],
+    "dictionary_columns": [],
+    "order_by": [
+     {
+      "field": "docket_id",
+      "direction": "asc",
+      "nulls": "nulls_last"
+     }
+    ],
+    "delta_columns": [],
+    "key_column": null,
+    "created_by": "datamap-sql-trial",
+    "footer_limit": 1048576
+   }
+  }
+ ],
+ "queries": [
+  {
+   "name": "bills_grain",
+   "sql": "SELECT (SELECT count(*) FROM (SELECT bill_id FROM bills GROUP BY bill_id HAVING count(*) > 1)) AS duplicate_keys, (SELECT count(*) FROM bills WHERE bill_id IS NULL) AS null_keys, (SELECT count(*) FROM bills) AS row_count"
+  },
+  {
+   "name": "rulemaking_timeline_grain",
+   "sql": "SELECT (SELECT count(*) FROM (SELECT rulemaking_id, event, source_key FROM rulemaking_timeline GROUP BY rulemaking_id, event, source_key HAVING count(*) > 1)) AS duplicate_keys, (SELECT count(*) FROM rulemaking_timeline WHERE rulemaking_id IS NULL OR event IS NULL OR source_key IS NULL) AS null_keys, (SELECT count(*) FROM rulemaking_timeline) AS row_count"
+  },
+  {
+   "name": "docket_comments_grain",
+   "sql": "SELECT (SELECT count(*) FROM (SELECT docket_id FROM docket_comments GROUP BY docket_id HAVING count(*) > 1)) AS duplicate_keys, (SELECT count(*) FROM docket_comments WHERE docket_id IS NULL) AS null_keys, (SELECT count(*) FROM docket_comments) AS row_count"
+  },
+  {
+   "name": "open_comment_periods_rows",
+   "sql": "SELECT count(*) AS row_count FROM open_comment_periods"
+  },
+  {
+   "name": "member_voting_record_rows",
+   "sql": "SELECT count(*) AS row_count FROM member_voting_record"
+  },
+  {
+   "name": "rule_history_rows",
+   "sql": "SELECT count(*) AS row_count FROM rule_history"
+  },
+  {
+   "name": "rule_history",
+   "sql": "SELECT * FROM rule_history"
+  }
+ ]
+}

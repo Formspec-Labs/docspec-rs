@@ -482,7 +482,9 @@ Arrow IPC schema or exact native Arrow-serde/Iceberg schema artifact per native 
 using shared native guards, without opening inputs or writing job destinations.
 Results distinguish inferred schemas from input admission and execution, both
 `not_run`. Standard IPC schema bytes retain native nested types and metadata for
-PyArrow readers. Nonempty table operations refuse.
+PyArrow readers. Nonempty table operations refuse. Like `job-plan`, it refuses
+`implicit_cast` when coercion would add a cast between text, number, date/time
+or boolean values; casts written in the SQL pass and `docspec job` is unchanged.
 
 The small managed-quality policy change separately admits mapping revision `2`
 alongside `1`, preserving exact evidence/policy/rules equality. Focused policy tests,

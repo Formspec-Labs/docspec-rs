@@ -17,6 +17,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
+mod coercion;
 pub(super) mod constants;
 
 #[derive(Debug)]
@@ -144,7 +145,7 @@ impl JobPlanSpec {
     /// # Errors
     /// Refuses invalid bindings, unsupported calculations, and capacity or artifact failures.
     pub async fn prepare(self, limits: Limits) -> Result<JobPlanResult> {
-        let job = Job::new(limits, self.scratch)?;
+        let job = Job::new(limits, self.scratch)?.refusing_implicit_casts();
         let mut names = BTreeSet::new();
         for SchemaInput { name, schema } in self.inputs {
             if name.is_empty() || !names.insert(name.to_lowercase()) {
@@ -209,10 +210,23 @@ impl Job {
                 "SQL placeholder names must match the supplied parameters exactly",
             ));
         }
-        if parameters.is_empty() {
-            return Ok(frame);
+        let frame = if parameters.is_empty() {
+            frame
+        } else {
+            frame.with_param_values(bound_values(parameters)?)?
+        };
+        if self.refuse_implicit_casts {
+            coercion::refuse_implicit_casts(
+                &self.context.state_ref().read(),
+                frame.logical_plan(),
+            )?;
         }
-        let values = parameters
+        Ok(frame)
+    }
+}
+
+fn bound_values(parameters: &BTreeMap<String, Value>) -> Result<Vec<(String, ScalarValue)>> {
+    parameters
             .iter()
             .map(|(name, value)| {
                 let scalar = match value {
@@ -230,10 +244,7 @@ impl Job {
                 };
                 Ok((name.clone(), scalar))
             })
-            .collect::<Result<Vec<_>>>()?;
-        let frame = frame.with_param_values(values)?;
-        Ok(frame)
-    }
+            .collect()
 }
 
 #[cfg(test)]
