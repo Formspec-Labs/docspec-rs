@@ -280,6 +280,16 @@ impl Budget {
             .set_bool(
                 "datafusion.optimizer.enable_join_dynamic_filter_pushdown",
                 false,
+            )
+            // DataFusion 53.1's `push_down_leaf_projections` leaks extracted
+            // `__datafusion_extracted_N` columns across aliased outer joins
+            // (`apache/datafusion#22971`, `dr-7uke`), failing with ambiguous
+            // schema errors on valid views and filters. Top-level column
+            // pruning (`OptimizeProjections` + `ProjectionPushdown`) remains
+            // active; re-enable once DataFusion >= 55.2 is qualified.
+            .set_bool(
+                "datafusion.optimizer.enable_leaf_expression_pushdown",
+                false,
             );
         // Bound each partition's merge headroom to 1/16 of its native share,
         // leaving room for concurrent sorts and retained steps. Preserve the
