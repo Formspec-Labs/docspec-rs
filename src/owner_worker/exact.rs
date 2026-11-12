@@ -53,12 +53,17 @@ impl std::fmt::Display for BridgeError {
 
 impl std::error::Error for BridgeError {}
 
-/// Mutable node and byte counter enforcing structure, depth, and memory budgets across a page.
+const PAGE_RESERVATION_SLAB_BYTES: usize = 64 * 1024;
+
+/// Mutable node and byte counter enforcing structure, depth, and shared memory budgets across a page.
 #[derive(Debug)]
 pub(super) struct ExactBudget {
     pub nodes: usize,
     pub bytes: usize,
     pub max_bytes: usize,
+    budget: Option<crate::budget::Budget>,
+    reserved_bytes: usize,
+    permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 impl ExactBudget {
@@ -67,6 +72,20 @@ impl ExactBudget {
             nodes: 0,
             bytes: 0,
             max_bytes,
+            budget: None,
+            reserved_bytes: 0,
+            permit: None,
+        }
+    }
+
+    pub(super) fn admitted(budget: crate::budget::Budget, max_bytes: usize) -> Self {
+        Self {
+            nodes: 0,
+            bytes: 0,
+            max_bytes,
+            budget: Some(budget),
+            reserved_bytes: 0,
+            permit: None,
         }
     }
 
@@ -90,6 +109,29 @@ impl ExactBudget {
                 "The owner page exceeds the supported byte budget.",
                 413,
             ));
+        }
+        if let Some(budget) = &self.budget
+            && self.bytes > self.reserved_bytes
+        {
+            let needed = self.bytes - self.reserved_bytes;
+            let remaining_cap = self.max_bytes - self.reserved_bytes;
+            let preferred = needed
+                .div_ceil(PAGE_RESERVATION_SLAB_BYTES)
+                .saturating_mul(PAGE_RESERVATION_SLAB_BYTES)
+                .min(remaining_cap);
+            let (acquired, chunk_permit) = match budget.reserve(preferred) {
+                Ok(p) => (preferred, p),
+                Err(_) if preferred > needed => {
+                    let exact_permit = budget.reserve(needed).map_err(super::map_job_error)?;
+                    (needed, exact_permit)
+                }
+                Err(err) => return Err(super::map_job_error(err)),
+            };
+            self.reserved_bytes = self.reserved_bytes.saturating_add(acquired);
+            match &mut self.permit {
+                Some(existing) => existing.merge(chunk_permit),
+                None => self.permit = Some(chunk_permit),
+            }
         }
         Ok(())
     }

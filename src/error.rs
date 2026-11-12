@@ -49,6 +49,7 @@ impl ErrorKind {
                         | "source_fence_lost"
                         | "unproven_succession"
                         | "continuous_child_owned"
+                        | "existing_output"
                 ) =>
             {
                 Self::Conflict

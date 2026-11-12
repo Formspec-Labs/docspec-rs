@@ -448,18 +448,7 @@ fn parameter_scalar_value(
     };
 
     if value.is_null() {
-        let non_null: Vec<&str> = allowed_types
-            .iter()
-            .copied()
-            .filter(|&t| t != "null")
-            .collect();
-        return Ok(match non_null.as_slice() {
-            ["boolean"] => ScalarValue::Boolean(None),
-            ["integer"] => ScalarValue::Int64(None),
-            ["number"] => ScalarValue::Float64(None),
-            ["string"] => ScalarValue::Utf8(None),
-            _ => ScalarValue::Null,
-        });
+        return Ok(ScalarValue::Null);
     }
 
     let resolved_type = if allowed_types.is_empty() {
@@ -737,7 +726,7 @@ pub(super) fn prepare_sql_parameters(
         let scalar =
             parameter_scalar_value(val, prop_map, raw_lexemes.get(name).map(String::as_str))?;
         let slot_id = format!("{prefix}{}", bound_values.len() + 1);
-        replacements.push((start, end, format!("${slot_id}")));
+        replacements.push((start, end, format!(" ${slot_id} ")));
         bound_values.push((slot_id, scalar));
         Ok(())
     };

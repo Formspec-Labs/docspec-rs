@@ -316,9 +316,31 @@ pub async fn export_nquads(
     }
 
     let mask = ProjectionMask::roots(builder.parquet_schema(), [root_col_idx]);
+    let mut max_est_row_bytes = 0usize;
+    let num_leaves = builder.parquet_schema().num_columns();
+    for rg in builder.metadata().row_groups() {
+        let rows = usize::try_from(rg.num_rows().max(0)).unwrap_or(0);
+        if rows == 0 {
+            continue;
+        }
+        let mut rg_bytes = 0usize;
+        for leaf_idx in 0..num_leaves {
+            if mask.leaf_included(leaf_idx) {
+                let col_bytes =
+                    usize::try_from(rg.column(leaf_idx).uncompressed_size().max(0)).unwrap_or(0);
+                rg_bytes = rg_bytes.saturating_add(col_bytes);
+            }
+        }
+        max_est_row_bytes = max_est_row_bytes.max(rg_bytes.div_ceil(rows));
+    }
+    let batch_rows = if max_est_row_bytes > 0 {
+        (budget.limits.max_batch_bytes / max_est_row_bytes).clamp(1, budget.limits.batch_rows)
+    } else {
+        budget.limits.batch_rows
+    };
     let reader = builder
         .with_projection(mask)
-        .with_batch_size(budget.limits.batch_rows)
+        .with_batch_size(batch_rows)
         .build()?;
 
     let temp_path = parent_abs.join(format!(
