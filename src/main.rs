@@ -703,7 +703,7 @@ async fn async_main() -> anyhow::Result<()> {
             }
         }
         Command::Job(SpecArg { spec }) => {
-            let spec = read_json::<docspec::job::JobSpec>(spec)?;
+            let (spec, spec_sha256) = read_json_with_sha256::<docspec::job::JobSpec>(spec)?;
             #[cfg(feature = "remote")]
             let result = if let Some(path) = &cli.remote {
                 let config = read_remote_config(path.clone())?;
@@ -713,12 +713,13 @@ async fn async_main() -> anyhow::Result<()> {
                     config.secret_env,
                 )
                 .await?;
-                spec.run_with_remote(limits, remote).await
+                spec.run_with_remote_and_spec_sha256(limits, remote, spec_sha256)
+                    .await
             } else {
-                spec.run(limits).await
+                spec.run_with_spec_sha256(limits, spec_sha256).await
             };
             #[cfg(not(feature = "remote"))]
-            let result = spec.run(limits).await;
+            let result = spec.run_with_spec_sha256(limits, spec_sha256).await;
             match result {
                 Ok(result) => print_json(&result)?,
                 Err(failure) => {
@@ -1652,6 +1653,22 @@ fn read_json<T: serde::de::DeserializeOwned>(path: PathBuf) -> anyhow::Result<T>
         "metadata input exceeds 32 MiB"
     );
     Ok(serde_json::from_reader(BufReader::new(file))?)
+}
+
+fn read_json_with_sha256<T: serde::de::DeserializeOwned>(
+    path: PathBuf,
+) -> anyhow::Result<(T, String)> {
+    use sha2::{Digest as _, Sha256};
+    use std::io::Read as _;
+    let file = File::open(path)?;
+    let size = file.metadata()?.len();
+    anyhow::ensure!(size <= 32 << 20, "metadata input exceeds 32 MiB");
+    let mut bytes = Vec::with_capacity(size as usize);
+    file.take(size.saturating_add(1)).read_to_end(&mut bytes)?;
+    anyhow::ensure!(bytes.len() as u64 == size, "metadata input size changed");
+    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let parsed = serde_json::from_slice(&bytes)?;
+    Ok((parsed, digest))
 }
 
 fn read_job_metadata(path: PathBuf, limit: usize) -> anyhow::Result<Vec<u8>> {

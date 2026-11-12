@@ -4,6 +4,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use docspec::{budget::Limits, job::JobSpec};
 use flate2::{Compression, write::GzEncoder};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{io::Write, process::Command};
 
 #[tokio::test]
@@ -37,7 +38,8 @@ async fn cli_and_library_export_equal_bytes_without_a_lifecycle_workspace() {
         "outputs":[{"name":"result.parquet","path":root.path().join("cli.parquet"),"sql":"SELECT * FROM settled","settings":{"profile":"ranged","row_group_rows":2,"order_by":[{"field":"id","direction":"asc","nulls":"nulls_last"}],"columns":[],"dictionary_columns":["kind"],"delta_columns":["text"],"key_column":null,"created_by":"job CLI fixture v1","footer_limit":524288}}]
     });
     let spec = root.path().join("job.json");
-    std::fs::write(&spec, serde_json::to_vec(&specification).unwrap()).unwrap();
+    let raw_spec_bytes = serde_json::to_vec(&specification).unwrap();
+    std::fs::write(&spec, &raw_spec_bytes).unwrap();
     let limits = Limits {
         compute_threads: 2,
         memory_bytes: 32 << 20,
@@ -64,11 +66,26 @@ async fn cli_and_library_export_equal_bytes_without_a_lifecycle_workspace() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!workspace.exists());
-    let cli: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut cli: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        cli["job_spec_sha256"],
+        format!("{:x}", Sha256::digest(&raw_spec_bytes))
+    );
     specification["outputs"][0]["path"] = json!(root.path().join("library.parquet"));
     let typed: JobSpec = serde_json::from_value(specification).unwrap();
     let library = typed.run(limits).await.unwrap();
-    assert_eq!(cli, serde_json::to_value(library).unwrap());
+    let mut library_value = serde_json::to_value(&library).unwrap();
+    assert_eq!(
+        library_value["job_spec_sha256"],
+        format!("{:x}", Sha256::digest(serde_json::to_vec(&typed).unwrap()))
+    );
+    assert_ne!(cli["job_spec_sha256"], library_value["job_spec_sha256"]);
+    cli.as_object_mut().unwrap().remove("job_spec_sha256");
+    library_value
+        .as_object_mut()
+        .unwrap()
+        .remove("job_spec_sha256");
+    assert_eq!(cli, library_value);
     assert_eq!(
         std::fs::read(root.path().join("cli.parquet")).unwrap(),
         std::fs::read(root.path().join("library.parquet")).unwrap()
@@ -247,4 +264,175 @@ fn create_file_refuses_changed_source_without_catalog_configuration_or_workspace
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!workspace.exists());
+}
+
+#[tokio::test]
+async fn job_receipt_binds_stable_job_id_spec_digest_input_versions_and_step_summaries() {
+    let root = tempfile::tempdir().unwrap();
+    let empty_id_scratch = root.path().join("empty-id-scratch");
+    let invalid: JobSpec = serde_json::from_value(json!({
+        "id": "   ",
+        "scratch": empty_id_scratch,
+        "inputs": [{"name": "items", "kind": "parquet", "path": "missing.parquet"}],
+        "steps": [],
+        "outputs": []
+    }))
+    .unwrap();
+    assert_eq!(
+        invalid
+            .run(Limits::default())
+            .await
+            .unwrap_err()
+            .error
+            .code(),
+        "invalid_spec"
+    );
+    assert!(!empty_id_scratch.exists());
+
+    let parquet_path = root.path().join("items.parquet");
+    super::scalar::input(
+        &parquet_path,
+        &[
+            (Some(2), Some("beta".into())),
+            (Some(1), Some("alpha".into())),
+        ],
+    );
+    let jsonl_path = root.path().join("tags.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        b"{\"id\":1,\"tag\":\"keep\"}\n{\"id\":2,\"tag\":\"keep\"}\n",
+    )
+    .unwrap();
+    let parquet_bytes = std::fs::read(&parquet_path).unwrap();
+    let jsonl_bytes = std::fs::read(&jsonl_path).unwrap();
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("tag", DataType::Utf8, true),
+    ]);
+    let step_view_sql =
+        "SELECT i.id, i.text, t.tag FROM items i JOIN tags t ON i.id = t.id WHERE t.tag = $wanted";
+    let step_mat_sql = "SELECT id, text, tag FROM filtered";
+    let out_path = root.path().join("ordered.parquet");
+    let specification = json!({
+        "id": "urn:example:job:test",
+        "scratch": root.path().join("scratch"),
+        "inputs": [
+            {"name": "items", "kind": "parquet", "path": parquet_path},
+            {"name": "tags", "kind": "json_lines", "files": [{"key": "raw/tags", "path": jsonl_path}], "schema": schema}
+        ],
+        "steps": [
+            {"name": "filtered", "sql": step_view_sql, "parameters": {"wanted": "keep"}, "materialize": false},
+            {"name": "settled", "sql": step_mat_sql, "materialize": true}
+        ],
+        "outputs": [{
+            "name": "ordered",
+            "path": out_path,
+            "sql": "SELECT * FROM settled",
+            "settings": {
+                "profile": "whole",
+                "row_group_rows": 128,
+                "order_by": [{"field": "id", "direction": "asc", "nulls": "nulls_last"}],
+                "columns": [],
+                "dictionary_columns": [],
+                "delta_columns": [],
+                "key_column": null,
+                "created_by": "dr-297r fixture",
+                "footer_limit": 524288
+            }
+        }],
+        "queries": [{
+            "name": "zero_counters",
+            "sql": "SELECT count(*) FILTER (WHERE id IS NULL) AS null_ids FROM outputs.\"ordered\""
+        }]
+    });
+    let spec_path = root.path().join("pretty-job.json");
+    // Pretty-print with indentation so raw file SHA-256 differs from compact JSON.
+    let raw_spec_bytes = serde_json::to_vec_pretty(&specification).unwrap();
+    std::fs::write(&spec_path, &raw_spec_bytes).unwrap();
+    let limits_path = root.path().join("limits.json");
+    std::fs::write(
+        &limits_path,
+        serde_json::to_vec(&Limits {
+            compute_threads: 2,
+            memory_bytes: 32 << 20,
+            batch_rows: 8,
+            max_batch_bytes: 4 << 20,
+            scratch_bytes: 32 << 20,
+            ..Limits::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(root.path().join("unused-workspace"))
+        .arg("--limits")
+        .arg(&limits_path)
+        .args(["job", "--spec"])
+        .arg(&spec_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["job_id"], "urn:example:job:test");
+    assert_eq!(
+        receipt["job_spec_sha256"],
+        format!("{:x}", Sha256::digest(&raw_spec_bytes))
+    );
+    let inputs = receipt["inputs"].as_array().unwrap();
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs[0]["name"], "items");
+    assert_eq!(inputs[0]["kind"], "parquet");
+    assert_eq!(inputs[0]["path"], json!(parquet_path));
+    assert_eq!(
+        inputs[0]["sha256"],
+        format!("{:x}", Sha256::digest(&parquet_bytes))
+    );
+    assert_eq!(inputs[0]["bytes"], parquet_bytes.len() as u64);
+
+    assert_eq!(inputs[1]["name"], "tags");
+    assert_eq!(inputs[1]["kind"], "json_lines");
+    assert_eq!(inputs[1]["path"], json!(jsonl_path));
+    assert_eq!(
+        inputs[1]["sha256"],
+        format!("{:x}", Sha256::digest(&jsonl_bytes))
+    );
+    assert_eq!(inputs[1]["bytes"], jsonl_bytes.len() as u64);
+    assert_eq!(inputs[1]["files"][0]["key"], "raw/tags");
+
+    let steps = receipt["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["name"], "filtered");
+    assert_eq!(steps[0]["storage"], "view");
+    assert_eq!(steps[0]["materialize"], false);
+    assert_eq!(
+        steps[0]["sql_sha256"],
+        format!("{:x}", Sha256::digest(step_view_sql.as_bytes()))
+    );
+    assert_eq!(
+        steps[0]["parameters_sha256"],
+        format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&json!({"wanted": "keep"})).unwrap())
+        )
+    );
+    assert_eq!(steps[1]["name"], "settled");
+    assert_eq!(steps[1]["materialize"], true);
+    assert_eq!(
+        steps[1]["sql_sha256"],
+        format!("{:x}", Sha256::digest(step_mat_sql.as_bytes()))
+    );
+    assert!(steps[1].get("parameters_sha256").is_none());
+
+    let out_bytes = std::fs::read(&out_path).unwrap();
+    assert_eq!(
+        receipt["outputs"][0]["sha256"],
+        format!("{:x}", Sha256::digest(&out_bytes))
+    );
+    assert_eq!(receipt["outputs"][0]["rows"], 2);
+    assert_eq!(receipt["queries"][0]["data"], json!([{"null_ids": 0}]));
 }

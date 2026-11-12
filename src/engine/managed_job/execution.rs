@@ -58,6 +58,8 @@ struct ViewDocument<'a> {
 }
 #[derive(Serialize)]
 struct JobIdentity<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<&'a str>,
     path: &'a Path,
     sha256: &'a str,
     size: u64,
@@ -130,11 +132,14 @@ impl Engine {
         let mut schema_memory = Vec::new();
         let mut identities = BTreeMap::new();
         let mut result = JobResult {
+            job_id: spec.id.clone(),
+            job_spec_sha256: admitted.job.sha256.clone(),
             native_inputs: Vec::new(),
             native_versions: Vec::new(),
             table_operations: Vec::new(),
             #[cfg(feature = "substrait")]
             saved_plans: Vec::new(),
+            inputs: Vec::new(),
             steps: Vec::new(),
             outputs: Vec::new(),
             queries: Vec::new(),
@@ -383,6 +388,7 @@ impl Engine {
                 }
                 _ => return Err(mismatch()),
             }
+            result.inputs.push(observed_managed_input(input, saved)?);
             let schema = job.input_schema(input.name()).await?;
             let bytes = crate::job::retained::encode_schema(&schema, &budget)?;
             let schema_sha256 = crate::job::retained::retain_schema_into(
@@ -556,14 +562,11 @@ impl Engine {
             retain_phase_schema(&phase, &budget, &mut schemas, &mut schema_memory)?;
             identities.insert(relation_key(false, step.name())?, identity);
             steps.push(serde_json::json!({"name":phase.name,"material_identity":phase.material_identity,"schema_sha256":phase.schema_sha256,"completion":phase.object,"dependencies":phase.dependencies}));
-            result.steps.push(StepResult {
-                name: step.name().into(),
-                storage: if materialized {
-                    StepStorage::Scratch
-                } else {
-                    StepStorage::View
-                },
-            });
+            result.steps.push(step.step_result(if materialized {
+                StepStorage::Scratch
+            } else {
+                StepStorage::View
+            })?);
             // The phase seal precedes all explicit release_after effects.
             for name in step.release_after() {
                 job.release(name)?;
@@ -754,6 +757,7 @@ impl Engine {
             operation: &request.operation,
             request_digest: &admitted.request_digest,
             job: JobIdentity {
+                id: spec.id.as_deref(),
                 path: &request.job.path,
                 sha256: &request.job.sha256,
                 size: admitted.job.reference.bytes,
@@ -839,13 +843,17 @@ impl Engine {
         let partial;
         let input_custody;
         let input_custody_memory;
-        let (candidate, view_set_digest, outputs, reports, result, completion_manifest) =
+        let (job_id, candidate, view_set_digest, outputs, reports, result, completion_manifest) =
             if let Some(completed) = completed {
                 let bytes = witness_bytes(&completed.manifest, &self.inner.lifecycle.budget)?;
                 let document: serde_json::Value = serde_json::from_slice(&bytes.value)?;
                 input_custody = input_custody::completed_references(&document)?;
                 input_custody_memory = self.request_memory(&input_custody)?;
                 (
+                    document["result"]["job_id"]
+                        .as_str()
+                        .or_else(|| document["job"]["id"].as_str())
+                        .map(str::to_owned),
                     Some(completed.candidate.clone()),
                     document["view_set_digest"].as_str().map(str::to_owned),
                     document["outputs"]
@@ -865,6 +873,7 @@ impl Engine {
                 input_custody_memory = references._memory;
                 partial = self.partial_job_result(&admitted, &rows).await?;
                 (
+                    partial.value.result["job_id"].as_str().map(str::to_owned),
                     None,
                     None,
                     partial.value.outputs.clone(),
@@ -876,6 +885,8 @@ impl Engine {
         let mut receipt = ManagedJobReceipt {
             dataset: dataset.clone(),
             operation: operation.clone(),
+            job_id,
+            job_spec_sha256: admitted.job.sha256.clone(),
             request_digest: admitted.request_digest.clone(),
             status: if candidate.is_some() {
                 "completed"
@@ -924,11 +935,14 @@ impl Engine {
         let bytes = witness_bytes(&admitted.job, budget)?;
         let spec: JobSpec = serde_json::from_slice(&bytes.value)?;
         let mut result = JobResult {
+            job_id: spec.id.clone(),
+            job_spec_sha256: admitted.job.sha256.clone(),
             native_inputs: Vec::new(),
             native_versions: Vec::new(),
             table_operations: Vec::new(),
             #[cfg(feature = "substrait")]
             saved_plans: Vec::new(),
+            inputs: Vec::new(),
             steps: Vec::new(),
             outputs: Vec::new(),
             queries: Vec::new(),
@@ -936,13 +950,17 @@ impl Engine {
         let mut outputs = Vec::new();
         let mut reports = Vec::new();
         let operation = &admitted.request.operation;
+        for (index, input) in spec.inputs.iter().enumerate() {
+            let key = format!("job-input/{operation}/{index}");
+            let _memory = rows.reserve_decoded(budget, &[&key])?;
+            if let Some((_, _, saved)) = rows.get_record::<InputAdmission>(&key)? {
+                result.inputs.push(observed_managed_input(input, &saved)?);
+            }
+        }
         for (index, step) in spec.steps.iter().enumerate() {
             let key = format!("job-phase/{operation}/step/{index}");
             if rows.contains_key(&key) {
-                result.steps.push(StepResult {
-                    name: step.name().into(),
-                    storage: StepStorage::Scratch,
-                });
+                result.steps.push(step.step_result(StepStorage::Scratch)?);
             }
         }
         for (index, output) in spec.outputs.iter().enumerate() {
@@ -1019,6 +1037,74 @@ fn validate_phase(phase: &Phase, admitted: &Admission, name: &str, identity: &st
         return Err(mismatch());
     }
     Ok(())
+}
+
+fn observed_managed_input(input: &JobInput, saved: &InputAdmission) -> Result<InputResult> {
+    match input {
+        JobInput::Parquet { name, path } => {
+            let member = saved.files.first().ok_or_else(mismatch)?;
+            Ok(InputResult {
+                name: name.clone(),
+                kind: "parquet".into(),
+                path: Some(path.clone()),
+                sha256: Some(member.sha256.clone()),
+                bytes: Some(member.size),
+                ..Default::default()
+            })
+        }
+        JobInput::JsonLines { name, .. } => {
+            let mut files = Vec::with_capacity(saved.files.len());
+            let mut total_bytes = 0_u64;
+            for member in &saved.files {
+                total_bytes = total_bytes.checked_add(member.size).ok_or_else(capacity)?;
+                files.push(InputFileResult {
+                    key: member.key.clone(),
+                    path: member.path.clone(),
+                    sha256: member.sha256.clone(),
+                    bytes: member.size,
+                });
+            }
+            let (path, digest) = if files.len() == 1 {
+                (Some(files[0].path.clone()), Some(files[0].sha256.clone()))
+            } else {
+                let summary = files
+                    .iter()
+                    .map(|f| (&f.key, &f.sha256, f.bytes))
+                    .collect::<Vec<_>>();
+                (None, Some(sha256(&serde_json::to_vec(&summary)?)))
+            };
+            Ok(InputResult {
+                name: name.clone(),
+                kind: "json_lines".into(),
+                path,
+                sha256: digest,
+                bytes: Some(total_bytes),
+                files,
+                ..Default::default()
+            })
+        }
+        JobInput::NativeTable {
+            name,
+            metadata_location,
+            table_uuid,
+            snapshot,
+            schema_id,
+        } => {
+            let custody = saved.snapshot_custody.as_ref().ok_or_else(mismatch)?;
+            Ok(InputResult {
+                name: name.clone(),
+                kind: "native_table".into(),
+                uri: Some(metadata_location.clone()),
+                sha256: Some(custody.metadata_sha256.clone()),
+                bytes: Some(custody.metadata_size),
+                table_uuid: Some(*table_uuid),
+                snapshot_id: *snapshot,
+                schema_id: Some(*schema_id),
+                ..Default::default()
+            })
+        }
+        _ => Err(mismatch()),
+    }
 }
 
 fn retain_input_admission(

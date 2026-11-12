@@ -2777,3 +2777,111 @@ async fn a_phase_with_another_origin_runtime_cannot_be_relabelled() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn managed_job_receipt_and_manifest_bind_job_id_spec_digest_inputs_and_step_summaries() {
+    let root = tempfile::tempdir().unwrap();
+    let input_bytes = b"{\"id\":1,\"amount\":10}\n{\"id\":2,\"amount\":20}\n";
+    let input_path = root.path().join("input.jsonl");
+    std::fs::write(&input_path, input_bytes).unwrap();
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("amount", DataType::Int64, true),
+    ]);
+    let step_sql = "SELECT id, amount FROM raw";
+    let report_sql = "SELECT COUNT(*) - 2 AS invalid_rows FROM outputs.\"values\"";
+    let job_spec: JobSpec = serde_json::from_value(json!({
+        "id": "urn:example:job:managed-test",
+        "scratch": root.path().join("caller-scratch"),
+        "inputs": [{"kind": "json_lines", "name": "raw", "files": [{"key": "original", "path": input_path}], "schema": schema}],
+        "steps": [{"name": "material", "sql": step_sql, "materialize": true}],
+        "outputs": [{"name": "values", "path": root.path().join("caller-output.parquet"), "sql": "SELECT * FROM material", "settings": {
+            "profile": "whole", "row_group_rows": 128, "order_by": [{"field": "id"}],
+            "columns": [], "dictionary_columns": [], "delta_columns": [], "key_column": null,
+            "created_by": "dr-297r-managed-test", "footer_limit": 65536
+        }}],
+        "queries": [{"name": "invariants", "sql": report_sql}]
+    }))
+    .unwrap();
+    let job_artifact = artifact(root.path().join("job-managed.json"), &job_spec);
+    let report_schema = Schema::new(vec![Field::new("invalid_rows", DataType::Int64, false)]);
+    let encoded_report_schema =
+        crate::job::retained::encode_schema(&report_schema, &Budget::new(limits()).unwrap())
+            .unwrap();
+    let policy_json = json!({
+        "id": "policy-one",
+        "profile": COUNTERS,
+        "evaluator": {"id": "urn:docspec:evaluator:native-job-reports", "version": "1"},
+        "semantics": {"id": "urn:docspec:semantics:complete-integer-zero-row", "revision": "1"},
+        "job_sha256": job_artifact.sha256,
+        "view_names": {"inputs": ["raw"], "steps": ["material"], "outputs": ["values"], "reports": ["invariants"]},
+        "required_reports": [{"name": "invariants", "sql_sha256": sha256(report_sql.as_bytes()), "schema_ipc_base64": STANDARD.encode(&encoded_report_schema.bytes)}]
+    });
+    let policy_artifact = artifact(root.path().join("policy-managed.json"), &policy_json);
+    let command = ManagedJobCommand::Prepare(ManagedJobPrepare {
+        dataset: Id::new("native-job").unwrap(),
+        operation: Id::new("with-job-id").unwrap(),
+        definition: "independent-job-v1".into(),
+        job: job_artifact.clone(),
+        file_inputs: vec![JobFileInput {
+            name: "raw".into(),
+            members: vec![JobFileMember {
+                key: Some("original".into()),
+                sha256: sha256(input_bytes),
+                size: input_bytes.len() as u64,
+            }],
+        }],
+        snapshot_inputs: Vec::new(),
+        policy_id: Id::new("policy-one").unwrap(),
+        policy: policy_artifact,
+        expected_epoch: 0,
+        expected_selection: None,
+        producer_adoption: None,
+        producer_records: Vec::new(),
+        prerequisites: Vec::new(),
+    });
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let completed = engine.managed_job(command).await.unwrap();
+    assert_eq!(completed.status, "completed");
+    assert_eq!(
+        completed.job_id.as_deref(),
+        Some("urn:example:job:managed-test")
+    );
+    assert_eq!(completed.job_spec_sha256, job_artifact.sha256);
+    let result = completed.result.as_ref().unwrap();
+    assert_eq!(result["job_id"], "urn:example:job:managed-test");
+    assert_eq!(result["job_spec_sha256"], job_artifact.sha256);
+    assert_eq!(result["inputs"][0]["name"], "raw");
+    assert_eq!(result["inputs"][0]["kind"], "json_lines");
+    assert_eq!(result["inputs"][0]["sha256"], sha256(input_bytes));
+    assert_eq!(result["inputs"][0]["bytes"], input_bytes.len() as u64);
+    assert_eq!(result["steps"][0]["name"], "material");
+    assert_eq!(result["steps"][0]["materialize"], true);
+    assert_eq!(
+        result["steps"][0]["sql_sha256"],
+        sha256(step_sql.as_bytes())
+    );
+    let manifest_bytes = STANDARD
+        .decode(&completed.completion_manifest.as_ref().unwrap().bytes_base64)
+        .unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+    assert_eq!(manifest["job"]["id"], "urn:example:job:managed-test");
+    assert_eq!(&manifest["result"], result);
+    // Verify native retention roots still validate the completed manifest.
+    let accepted = engine
+        .managed_job(action(&completed, "accept"))
+        .await
+        .unwrap();
+    let selected = engine
+        .managed_job(action(&accepted, "select"))
+        .await
+        .unwrap();
+    assert_eq!(selected.selection, "selected");
+    let inspection = engine
+        .inspect(&Id::new("native-job").unwrap())
+        .await
+        .unwrap();
+    assert!(!inspection.is_empty());
+}

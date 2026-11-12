@@ -99,6 +99,8 @@ pub struct PreparedInput {
 pub struct PreparedJob {
     pub profile: &'static str,
     pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
     pub job: JobArtifact,
     pub job_size: usize,
     pub inputs: Vec<PreparedInput>,
@@ -267,6 +269,7 @@ impl PrepareJobSpec {
         let mut prepared = PreparedJob {
             profile: "urn:docspec:job:schema-only:1",
             status: "inferred",
+            job_id: spec.id.clone(),
             job: self.job,
             job_size: size,
             inputs: Vec::new(),

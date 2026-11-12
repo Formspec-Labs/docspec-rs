@@ -13,9 +13,11 @@ use crate::{
 };
 use arrow::datatypes::Schema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    io::Read,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -123,6 +125,34 @@ impl JobStep {
             Self::Components(step) => &step.release_after,
         }
     }
+    pub(crate) fn step_result(&self, storage: StepStorage) -> Result<StepResult> {
+        let (sql_sha256, parameters_sha256, materialize) = match self {
+            Self::Sql(step) => {
+                let params = if step.parameters.is_empty() {
+                    None
+                } else {
+                    Some(sha256_hex(&serde_json::to_vec(&step.parameters)?))
+                };
+                (
+                    Some(sha256_hex(step.sql.as_bytes())),
+                    params,
+                    step.materialize,
+                )
+            }
+            #[cfg(feature = "substrait")]
+            Self::Substrait(_) => (None, None, false),
+            Self::Components(step) => {
+                (Some(sha256_hex(step.components.sql.as_bytes())), None, true)
+            }
+        };
+        Ok(StepResult {
+            name: self.name().to_owned(),
+            storage,
+            sql_sha256,
+            parameters_sha256,
+            materialize,
+        })
+    }
 }
 
 /// One ordered output, separate from the relations it reads.
@@ -139,6 +169,8 @@ pub struct JobOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub scratch: PathBuf,
     #[serde(default)]
     pub catalog_root: Option<PathBuf>,
@@ -159,11 +191,56 @@ pub struct SqlQuery {
     pub sql: String,
 }
 
-/// Storage selected for one named relation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Exact observed local file member for a file-backed job input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputFileResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub path: PathBuf,
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+/// Observed version or file-digest binding for one declared job input.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputResult {
+    pub name: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<InputFileResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table_uuid: Option<uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_id: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<VersionRef>,
+}
+
+/// Storage and definition digest summary for one named relation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepResult {
     pub name: String,
     pub storage: StepStorage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters_sha256: Option<String>,
+    #[serde(default)]
+    pub materialize: bool,
 }
 
 /// An exported file's declared name and computed content identity.
@@ -177,6 +254,10 @@ pub struct OutputResult {
 /// Machine-readable local results; no clock or process identity enters them.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JobResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub job_spec_sha256: String,
     /// Summary facts from exact native inputs; unavailable observations remain null.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub native_inputs: Vec<super::NativeInputObservation>,
@@ -187,6 +268,8 @@ pub struct JobResult {
     #[cfg(feature = "substrait")]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub saved_plans: Vec<super::substrait::SubstraitReceipt>,
+    #[serde(default)]
+    pub inputs: Vec<InputResult>,
     pub steps: Vec<StepResult>,
     pub outputs: Vec<OutputResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -218,11 +301,13 @@ impl JobFailure {
 
 #[derive(Default)]
 struct Connections {
+    job_spec_sha256: Option<String>,
     catalog: Option<Arc<dyn iceberg::Catalog>>,
     #[cfg(feature = "remote")]
     remote: Option<crate::storage::remote::RemoteStorage>,
 }
 
+#[allow(clippy::result_large_err)]
 impl JobSpec {
     /// Executes every declared relation and export through one bounded SQL job.
     ///
@@ -231,6 +316,25 @@ impl JobSpec {
     /// resource and export failures. Completed outputs remain create-only.
     pub async fn run(&self, limits: Limits) -> std::result::Result<JobResult, JobFailure> {
         self.run_injected(limits, Connections::default()).await
+    }
+
+    /// Executes using the exact SHA-256 hex digest of the raw `JobSpec` JSON bytes.
+    ///
+    /// # Errors
+    /// Same validation, input, SQL, resource and export errors as [`Self::run`].
+    pub async fn run_with_spec_sha256(
+        &self,
+        limits: Limits,
+        job_spec_sha256: String,
+    ) -> std::result::Result<JobResult, JobFailure> {
+        self.run_injected(
+            limits,
+            Connections {
+                job_spec_sha256: Some(job_spec_sha256),
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     /// Executes with an explicitly injected native catalog and no lifecycle store.
@@ -265,6 +369,29 @@ impl JobSpec {
         self.run_injected(
             limits,
             Connections {
+                job_spec_sha256: None,
+                catalog: Some(remote.catalog.clone()),
+                remote: Some(remote),
+            },
+        )
+        .await
+    }
+
+    /// Runs with explicit remote connections and the raw `JobSpec` JSON SHA-256 digest.
+    ///
+    /// # Errors
+    /// Refuses conflicting catalog selection and the same errors as `run`.
+    #[cfg(feature = "remote")]
+    pub async fn run_with_remote_and_spec_sha256(
+        &self,
+        limits: Limits,
+        remote: crate::storage::remote::RemoteStorage,
+        job_spec_sha256: String,
+    ) -> std::result::Result<JobResult, JobFailure> {
+        self.run_injected(
+            limits,
+            Connections {
+                job_spec_sha256: Some(job_spec_sha256),
                 catalog: Some(remote.catalog.clone()),
                 remote: Some(remote),
             },
@@ -275,14 +402,20 @@ impl JobSpec {
     async fn run_injected(
         &self,
         limits: Limits,
-        connections: Connections,
+        mut connections: Connections,
     ) -> std::result::Result<JobResult, JobFailure> {
+        let job_spec_sha256 = connections.job_spec_sha256.take().unwrap_or_else(|| {
+            serde_json::to_vec(self).map_or_else(|_| String::new(), |bytes| sha256_hex(&bytes))
+        });
         let mut completed = JobResult {
+            job_id: self.id.clone(),
+            job_spec_sha256,
             native_inputs: Vec::new(),
             native_versions: Vec::new(),
             table_operations: Vec::new(),
             #[cfg(feature = "substrait")]
             saved_plans: Vec::new(),
+            inputs: Vec::new(),
             steps: Vec::new(),
             outputs: Vec::new(),
             queries: Vec::new(),
@@ -301,6 +434,9 @@ impl JobSpec {
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
+        if self.id.as_deref().is_some_and(|id| id.trim().is_empty()) {
+            return Err(Error::refusal("invalid_spec", "job id must not be empty"));
+        }
         let mut names = BTreeSet::new();
         for name in self
             .inputs
@@ -392,12 +528,22 @@ impl JobSpec {
         let compactions = super::metrics::Compactions::install(&job.context);
         for input in &self.inputs {
             match input {
-                JobInput::Parquet { name, path } => job.register_parquet(name, path).await?,
+                JobInput::Parquet { name, path } => {
+                    job.register_parquet(name, path).await?;
+                    result
+                        .inputs
+                        .push(observe_parquet_input(name, path, &job.budget)?);
+                }
                 JobInput::JsonLines {
                     name,
                     files,
                     schema,
-                } => job.register_json_lines(name, files.clone(), Arc::new(schema.clone()))?,
+                } => {
+                    job.register_json_lines(name, files.clone(), Arc::new(schema.clone()))?;
+                    result
+                        .inputs
+                        .push(observe_json_lines_input(name, files, &job.budget)?);
+                }
                 JobInput::NativeTable {
                     name,
                     metadata_location,
@@ -414,9 +560,37 @@ impl JobSpec {
                             schema_id: *schema_id,
                         },
                     )
-                    .await?
+                    .await?;
+                    let (sha256, bytes) =
+                        observe_optional_local_file(Path::new(metadata_location), &job.budget)?;
+                    result.inputs.push(InputResult {
+                        name: name.clone(),
+                        kind: "native_table".into(),
+                        uri: Some(metadata_location.clone()),
+                        sha256,
+                        bytes,
+                        table_uuid: Some(*table_uuid),
+                        snapshot_id: *snapshot,
+                        schema_id: Some(*schema_id),
+                        ..Default::default()
+                    });
                 }
-                JobInput::Iceberg { name, pin } => job.register_iceberg(name, pin).await?,
+                JobInput::Iceberg { name, pin } => {
+                    job.register_iceberg(name, pin).await?;
+                    let (sha256, local_bytes) =
+                        observe_optional_local_file(Path::new(&pin.metadata.path), &job.budget)?;
+                    result.inputs.push(InputResult {
+                        name: name.clone(),
+                        kind: "iceberg".into(),
+                        uri: Some(pin.metadata.path.clone()),
+                        sha256,
+                        bytes: Some(local_bytes.unwrap_or(pin.metadata.bytes)),
+                        snapshot_id: pin.snapshot,
+                        schema_id: Some(pin.schema_id),
+                        metadata_digest: Some(pin.metadata.digest.clone()),
+                        ..Default::default()
+                    });
+                }
                 JobInput::Version {
                     name,
                     workspace,
@@ -450,6 +624,19 @@ impl JobSpec {
                             observation,
                         }),
                     )?;
+                    result.inputs.push(InputResult {
+                        name: name.clone(),
+                        kind: "version".into(),
+                        uri: Some(physical_snapshot.selector.metadata_location.clone()),
+                        sha256: Some(physical_snapshot.metadata_sha256.clone()),
+                        bytes: Some(source.metadata_size),
+                        table_uuid: Some(physical_snapshot.selector.table_uuid),
+                        snapshot_id: physical_snapshot.selector.snapshot,
+                        schema_id: Some(source.schema_id),
+                        workspace: Some(workspace.clone()),
+                        version: Some(version.clone()),
+                        ..Default::default()
+                    });
                     result
                         .native_versions
                         .push(super::NativeVersionObservation {
@@ -527,10 +714,7 @@ impl JobSpec {
             for name in step.release_after() {
                 job.release_for_step(step_index, step.name(), name)?;
             }
-            result.steps.push(StepResult {
-                name: step.name().to_owned(),
-                storage,
-            });
+            result.steps.push(step.step_result(storage)?);
         }
         *running = None;
         let catalog = if !self.table_operations.is_empty() {
@@ -718,4 +902,162 @@ fn sql_references_table(sql: &str, table: &str) -> bool {
         start = end_pos;
     }
     false
+}
+
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn hash_local_file(path: &Path, budget: &crate::budget::Budget) -> Result<(String, u64)> {
+    const CHUNK_BYTES: usize = 65_536;
+    let _memory = budget.reserve(CHUNK_BYTES)?;
+    let mut file = std::fs::File::open(path)?;
+    let expected_len = file.metadata()?.len();
+    let mut buffer = vec![0_u8; CHUNK_BYTES];
+    let mut hasher = Sha256::new();
+    let mut total: u64 = 0;
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        total = total.checked_add(read as u64).ok_or_else(|| {
+            Error::refusal("capacity", "local input file size overflowed byte counter")
+        })?;
+    }
+    if total != expected_len {
+        return Err(Error::refusal(
+            "input_changed",
+            format!(
+                "local input file size changed while hashing {}",
+                path.display()
+            ),
+        ));
+    }
+    Ok((format!("{:x}", hasher.finalize()), total))
+}
+
+fn observe_optional_local_file(
+    path: &Path,
+    budget: &crate::budget::Budget,
+) -> Result<(Option<String>, Option<u64>)> {
+    if path.is_file() {
+        let (sha256, bytes) = hash_local_file(path, budget)?;
+        Ok((Some(sha256), Some(bytes)))
+    } else {
+        Ok((None, None))
+    }
+}
+
+fn collect_parquet_members(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = std::fs::metadata(&path)?;
+        if metadata.is_dir() {
+            collect_parquet_members(&path, out)?;
+        } else if metadata.is_file()
+            && metadata.len() > 0
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"))
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn observe_parquet_input(
+    name: &str,
+    path: &Path,
+    budget: &crate::budget::Budget,
+) -> Result<InputResult> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.is_file() {
+        let (sha256, bytes) = hash_local_file(path, budget)?;
+        return Ok(InputResult {
+            name: name.to_owned(),
+            kind: "parquet".into(),
+            path: Some(path.to_path_buf()),
+            sha256: Some(sha256),
+            bytes: Some(bytes),
+            ..Default::default()
+        });
+    }
+    let mut member_paths = Vec::new();
+    collect_parquet_members(path, &mut member_paths)?;
+    member_paths.sort();
+    let mut files = Vec::with_capacity(member_paths.len());
+    let mut total_bytes = 0_u64;
+    let mut canonical_members = Vec::with_capacity(member_paths.len());
+    for member_path in member_paths {
+        let (sha256, bytes) = hash_local_file(&member_path, budget)?;
+        total_bytes = total_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| Error::refusal("capacity", "directory Parquet input size overflowed"))?;
+        let rel = member_path
+            .strip_prefix(path)
+            .unwrap_or(&member_path)
+            .to_string_lossy()
+            .into_owned();
+        canonical_members.push((rel, sha256.clone(), bytes));
+        files.push(InputFileResult {
+            key: None,
+            path: member_path,
+            sha256,
+            bytes,
+        });
+    }
+    let dir_sha256 = sha256_hex(&serde_json::to_vec(&canonical_members)?);
+    Ok(InputResult {
+        name: name.to_owned(),
+        kind: "parquet".into(),
+        path: Some(path.to_path_buf()),
+        sha256: Some(dir_sha256),
+        bytes: Some(total_bytes),
+        files,
+        ..Default::default()
+    })
+}
+
+fn observe_json_lines_input(
+    name: &str,
+    declared_files: &[JsonLinesFile],
+    budget: &crate::budget::Budget,
+) -> Result<InputResult> {
+    let mut files = Vec::with_capacity(declared_files.len());
+    let mut total_bytes = 0_u64;
+    for declared in declared_files {
+        let (sha256, bytes) = hash_local_file(&declared.path, budget)?;
+        total_bytes = total_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| Error::refusal("capacity", "JSON Lines input size overflowed"))?;
+        files.push(InputFileResult {
+            key: Some(declared.key.clone()),
+            path: declared.path.clone(),
+            sha256,
+            bytes,
+        });
+    }
+    let (path, sha256) = if files.len() == 1 {
+        (Some(files[0].path.clone()), Some(files[0].sha256.clone()))
+    } else {
+        let summary = files
+            .iter()
+            .map(|f| (&f.key, &f.sha256, f.bytes))
+            .collect::<Vec<_>>();
+        (None, Some(sha256_hex(&serde_json::to_vec(&summary)?)))
+    };
+    Ok(InputResult {
+        name: name.to_owned(),
+        kind: "json_lines".into(),
+        path,
+        sha256,
+        bytes: Some(total_bytes),
+        files,
+        ..Default::default()
+    })
 }

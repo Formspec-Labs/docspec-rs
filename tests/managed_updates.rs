@@ -195,6 +195,7 @@ async fn protected_version_observes_pending_and_compacted_source_without_payload
     std::fs::rename(&data.path, &hidden).unwrap();
     let workspace = root.path().join("host");
     let mut job = JobSpec {
+        id: None,
         scratch: root.path().join("scratch"),
         catalog_root: None,
         table_operations: Vec::new(),

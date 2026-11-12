@@ -2,7 +2,8 @@
 // Rust guideline compliant 2026-02-21
 use super::*;
 use crate::job::{
-    Job, JobArtifact, JobInput, JobResult, JobSpec, JobStep, OutputResult, StepResult, StepStorage,
+    InputFileResult, InputResult, Job, JobArtifact, JobInput, JobResult, JobSpec, JobStep,
+    OutputResult, StepStorage,
 };
 use arrow::{
     array::Array,
@@ -199,6 +200,9 @@ pub struct JobArtifactWitness {
 pub struct ManagedJobReceipt {
     pub dataset: Id,
     pub operation: Id,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    pub job_spec_sha256: String,
     pub request_digest: String,
     pub status: String,
     pub candidate: Option<JobCandidateRef>,

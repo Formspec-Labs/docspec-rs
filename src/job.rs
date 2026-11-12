@@ -57,8 +57,8 @@ pub use prepare::{
 };
 pub use query_result::QueryResult;
 pub use spec::{
-    ComponentsStep, JobFailure, JobInput, JobOutput, JobResult, JobSpec, JobStep, OutputResult,
-    SqlQuery, SqlStep, StepResult,
+    ComponentsStep, InputFileResult, InputResult, JobFailure, JobInput, JobOutput, JobResult,
+    JobSpec, JobStep, OutputResult, SqlQuery, SqlStep, StepResult,
 };
 pub use table_operations::{TableOperation, TableOperationResult};
 
