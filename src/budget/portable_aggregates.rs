@@ -286,6 +286,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ordered_nested_aggregate_fits_many_small_groups() {
+        // Each of two inputs contributes two references per group. A migrated
+        // final aggregate charges the shared state repeatedly even with Utf8 leaves.
+        const GROUPS: i64 = 4_096;
+        let budget = Budget::new(Limits {
+            memory_bytes: 1 << 30,
+            compute_threads: 2,
+            ..Limits::default()
+        })
+        .unwrap();
+        let context = budget.context();
+        let text = |key, index| format!("{key:05}-{index}-{}", "x".repeat(240));
+        for (name, positions) in [("left_input", [4, 2]), ("right_input", [3, 1])] {
+            let keys = positions.into_iter().flat_map(|_| 0..GROUPS);
+            let indices = positions
+                .into_iter()
+                .flat_map(|i| (0..GROUPS).map(move |_| i));
+            let payloads = StringArray::from_iter(
+                keys.clone()
+                    .zip(indices.clone())
+                    .map(|(key, index)| (key != 0 || index != 1).then(|| text(key, index))),
+            );
+            let batch = RecordBatch::try_from_iter([
+                (
+                    "k",
+                    Arc::new(Int64Array::from_iter_values(keys)) as ArrayRef,
+                ),
+                ("i", Arc::new(Int64Array::from_iter_values(indices))),
+                ("s", Arc::new(payloads)),
+            ])
+            .unwrap();
+            context.register_batch(name, batch).unwrap();
+        }
+        let batches = context
+            .sql(
+                "SELECT k, array_agg(named_struct('s', s, 'i', i) ORDER BY i) AS refs \
+                 FROM (SELECT * FROM left_input UNION ALL SELECT * FROM right_input) GROUP BY k",
+            )
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let mut seen = vec![false; GROUPS as usize];
+        for batch in batches {
+            let keys = batch
+                .column(0)
+                .as_primitive::<arrow::datatypes::Int64Type>();
+            let references = batch.column(1).as_list::<i32>();
+            for (row, key) in keys.values().iter().copied().enumerate() {
+                assert!(!std::mem::replace(&mut seen[key as usize], true));
+                let items = references.value(row);
+                let items = items.as_struct();
+                let indices = items
+                    .column(1)
+                    .as_primitive::<arrow::datatypes::Int64Type>();
+                assert_eq!(indices.values().as_ref(), &[1, 2, 3, 4]);
+                let payloads = items.column(0).as_string::<i32>();
+                for (index, payload) in (1..=4).zip(payloads.iter()) {
+                    let expected = (key != 0 || index != 1).then(|| text(key, index));
+                    assert_eq!(payload, expected.as_deref());
+                }
+            }
+        }
+        assert!(seen.into_iter().all(|found| found));
+    }
+
+    #[tokio::test]
     async fn distinct_aggregate_keeps_shared_view_state_linear() {
         let mut groups =
             bounded("SELECT k, array_agg(DISTINCT named_struct('s', s)) AS a FROM t GROUP BY k")

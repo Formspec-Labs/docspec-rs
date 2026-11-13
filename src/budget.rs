@@ -342,6 +342,9 @@ impl Budget {
             .sort_spill_reservation_bytes
             .min((self.limits.memory_bytes / 2 / self.limits.compute_threads / 16).max(1));
         let mut config = config.with_sort_spill_reservation_bytes(sort_spill_bytes);
+        // DataFusion 55's migrated final aggregate overcharges shared nested state.
+        // Keep the supported grouped stream until the columnar ordered accumulator lands.
+        config.options_mut().execution.enable_migration_aggregate = false;
         // Scale PushdownSort's BufferExec cap (default 1 GiB) to 1/4 of each
         // partition's native pool share so bounded pools cannot starve on sort pushdown.
         let sort_pushdown_bytes = config
