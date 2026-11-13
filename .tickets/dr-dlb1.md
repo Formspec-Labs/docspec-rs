@@ -17,3 +17,9 @@ Umbrella for the DocSpec work created by the 2026-11-08/09 DDK decisions (data-d
 
 Local and origin main hold one line that every consumer pins; DDK attaches run evidence to a SpicyRegs dataset through a DocSpec job; the one-vote proof passes against that engine.
 
+
+## Notes
+
+**2026-11-13T16:06:11Z**
+
+2026-11-13: one line: local main = 98a2d54 contains every consumer pin (CT 98a2d54; DDK re-pinned to a main build, ss-co08). Remaining for this epic: push main (owner approval) and rerun the one-vote proof against it.
