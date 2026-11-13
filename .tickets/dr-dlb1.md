@@ -1,6 +1,6 @@
 ---
 id: dr-dlb1
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-09T19:38:50Z
@@ -23,3 +23,7 @@ Local and origin main hold one line that every consumer pins; DDK attaches run e
 **2026-11-13T16:06:11Z**
 
 2026-11-13: one line: local main = 98a2d54 contains every consumer pin (CT 98a2d54; DDK re-pinned to a main build, ss-co08). Remaining for this epic: push main (owner approval) and rerun the one-vote proof against it.
+
+**2026-11-13T16:26:26Z**
+
+2026-11-13: done. origin/main = 6a45723 (DataFusion 55.2 line at 98a2d54 plus tickets); congressional-tech pins 98a2d54 and DDK pins a content-addressed main build (b3a5d49d), so every consumer is on one line. DDK attaches DocSpec job run evidence to SpicyRegs OCC datasets (vertical slice, kind job productions, DDK-CATALOG-012). One-vote proof, engine half: the roll-99 / P000197 job on retained generation e7cdd80d returns Pelosi No -> nay, 214/210/8, one source row, tallies reconcile, broken filter and broken normalization caught, duplicate-key export refused - identical on b0342a7 and 98a2d54 (artifacts/one-vote-proof-20261113/PROOF.json). The receipt-to-capture pointer is spicy-regs work: ss-3u5d.
